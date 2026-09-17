@@ -226,6 +226,8 @@ fn copy_value(value:String)->Result<(),String>{Clipboard::new().and_then(|mut c|
 
 pub fn run(){
     tauri::Builder::default()
+        // Configure autostart here: this plugin accepts no JSON object configuration.
+        // Adding plugins.autostart to tauri.conf.json aborts startup on both platforms.
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app,_shortcut,event|{if event.state()==ShortcutState::Pressed{let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app);});}}).build())
         .setup(|app|{
