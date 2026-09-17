@@ -3,6 +3,7 @@ name: build-desktop
 on:
   workflow_dispatch:
   push:
+    branches: ["main"]
     tags: ["v*"]
 
 jobs:
@@ -47,4 +48,3 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
-
