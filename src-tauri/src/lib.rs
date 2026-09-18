@@ -261,13 +261,23 @@ fn open_picker(app: &AppHandle) -> Result<(), String> {
             let view_width=monitor.width().map_err(|e|e.to_string())? as f64;
             let view_height=monitor.height().map_err(|e|e.to_string())? as f64;
             #[cfg(target_os = "windows")]
+            let physical_bounds=(x as i32,y as i32,view_width as u32,view_height as u32);
+            #[cfg(target_os = "windows")]
             let (x,y,view_width,view_height) = {
                 let scale = monitor.scale_factor().map_err(|e|e.to_string())? as f64;
                 (x / scale, y / scale, view_width / scale, view_height / scale)
             };
-            WebviewWindowBuilder::new(app,&label,WebviewUrl::App("picker.html".into()))
+            let window=WebviewWindowBuilder::new(app,&label,WebviewUrl::App("picker.html".into()))
                 .title("取色鸭").decorations(false).transparent(true).shadow(false).always_on_top(true).skip_taskbar(true)
                 .position(x,y).inner_size(view_width,view_height).focused(true).build().map_err(|e|e.to_string())?;
+            #[cfg(target_os = "windows")]
+            {
+                let (x,y,width,height)=physical_bounds;
+                window.set_position(tauri::PhysicalPosition::new(x,y)).map_err(|e|e.to_string())?;
+                window.set_size(tauri::PhysicalSize::new(width,height)).map_err(|e|e.to_string())?;
+            }
+            #[cfg(not(target_os = "windows"))]
+            let _ = window;
             frames.insert(label,CaptureFrame{width,height,rgba:image.into_raw()});
         }
         Ok(())
