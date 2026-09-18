@@ -143,6 +143,25 @@ fn emit_state(app: &AppHandle, state: &AppState) -> Result<(), String> {
     app.emit("state-changed", value).map_err(|e| e.to_string())
 }
 
+fn show_main(app: &AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    app.set_activation_policy(tauri::ActivationPolicy::Regular).map_err(|e| e.to_string())?;
+    if let Some(window) = app.get_webview_window("main") {
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn hide_main(app: &AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.hide().map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    app.set_activation_policy(tauri::ActivationPolicy::Accessory).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn close_pickers(app: &AppHandle) {
     let state = app.state::<AppState>();
     let labels: Vec<_> = app.webview_windows().keys().filter(|k| k.starts_with("picker-")).cloned().collect();
@@ -202,7 +221,7 @@ fn open_picker(app: &AppHandle) -> Result<(), String> {
     let result=(|| {
         #[cfg(target_os = "macos")]
         ensure_screen_capture_permission()?;
-        if let Some(main) = app.get_webview_window("main") { main.hide().map_err(|e| e.to_string())?; }
+        hide_main(app)?;
         // Give the compositor time to remove the main window before taking the snapshot.
         std::thread::sleep(Duration::from_millis(180));
         let monitors=Monitor::all().map_err(|e| format!("无法读取屏幕：{e}"))?;
@@ -269,11 +288,11 @@ pub fn run(){
             let shortcut=settings.shortcut.clone(); app.manage(AppState{settings:Mutex::new(settings),captures:Mutex::new(HashMap::new()),picking:AtomicBool::new(false),data_path});
             app.global_shortcut().register(shortcut.as_str())?;
             let show=MenuItem::with_id(app,"show","打开取色鸭",true,None::<&str>)?;let pick=MenuItem::with_id(app,"pick","开始取色",true,None::<&str>)?;let quit=MenuItem::with_id(app,"quit","退出",true,None::<&str>)?;let menu=Menu::with_items(app,&[&show,&pick,&quit])?;
-            TrayIconBuilder::new().icon(app.default_window_icon().unwrap().clone()).tooltip("取色鸭 · Duck Color Picker").menu(&menu).on_menu_event(|app,event|match event.id.as_ref(){"show"=>{if let Some(w)=app.get_webview_window("main"){let _=w.show();let _=w.set_focus();}},"pick"=>{let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app);});},"quit"=>app.exit(0),_=>{}}).on_tray_icon_event(|tray,event|if let TrayIconEvent::Click{button:MouseButton::Left,button_state:MouseButtonState::Up,..}=event{let app=tray.app_handle();if let Some(w)=app.get_webview_window("main"){let _=w.show();let _=w.set_focus();}}).build(app)?;
-            if !std::env::args().any(|v|v=="--hidden"){if let Some(w)=app.get_webview_window("main"){w.show()?;}}
+            TrayIconBuilder::new().icon(app.default_window_icon().unwrap().clone()).tooltip("取色鸭 · Duck Color Picker").menu(&menu).on_menu_event(|app,event|match event.id.as_ref(){"show"=>{let _=show_main(app);},"pick"=>{let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app);});},"quit"=>app.exit(0),_=>{}}).on_tray_icon_event(|tray,event|if let TrayIconEvent::Click{button:MouseButton::Left,button_state:MouseButtonState::Up,..}=event{let _=show_main(tray.app_handle());}).build(app)?;
+            if !std::env::args().any(|v|v=="--hidden"){show_main(app.handle()).map_err(std::io::Error::other)?;} else {hide_main(app.handle()).map_err(std::io::Error::other)?;}
             Ok(())
         })
-        .on_window_event(|window,event|if window.label()=="main"{if let tauri::WindowEvent::CloseRequested{api,..}=event{api.prevent_close();let _=window.hide();}})
+        .on_window_event(|window,event|if window.label()=="main"{if let tauri::WindowEvent::CloseRequested{api,..}=event{api.prevent_close();let _=hide_main(window.app_handle());}})
         .invoke_handler(tauri::generate_handler![get_state,update_preferences,save_shortcut,start_picker,sample_color,confirm_color,cancel_picker,clear_history,delete_history,copy_value])
         .run(tauri::generate_context!()).expect("取色鸭启动失败");
 }
