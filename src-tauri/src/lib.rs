@@ -266,11 +266,10 @@ fn open_picker(app: &AppHandle, request: u64) -> Result<(), String> {
     let result=(|| {
         #[cfg(target_os = "macos")]
         ensure_screen_capture_permission()?;
-        if let Some(window) = app.get_webview_window("main") { window.hide().map_err(|e| e.to_string())?; }
-        #[cfg(target_os = "macos")]
-        app.set_activation_policy(tauri::ActivationPolicy::Regular).map_err(|e| e.to_string())?;
+        let main_was_visible = app.get_webview_window("main").is_some_and(|window| window.is_visible().unwrap_or(false));
+        hide_main(app)?;
         // Give the compositor time to remove the main window before taking the snapshot.
-        std::thread::sleep(Duration::from_millis(180));
+        if main_was_visible { std::thread::sleep(Duration::from_millis(180)); }
         let monitors=Monitor::all().map_err(|e| format!("无法读取屏幕：{e}"))?;
         if monitors.is_empty(){return Err("没有检测到显示器".into());}
         for (index,monitor) in monitors.into_iter().enumerate(){
@@ -296,7 +295,7 @@ fn open_picker(app: &AppHandle, request: u64) -> Result<(), String> {
             }
             let window=WebviewWindowBuilder::new(app,&label,WebviewUrl::App("picker.html".into()))
                 .title("取色鸭").decorations(false).transparent(true).shadow(false).always_on_top(true).skip_taskbar(true)
-                .position(x,y).inner_size(view_width,view_height).focused(true).build().map_err(|e|e.to_string())?;
+                .position(x,y).inner_size(view_width,view_height).accept_first_mouse(true).focused(false).build().map_err(|e|e.to_string())?;
             if request != state.picker_generation.load(Ordering::SeqCst) {
                 let _ = window.close();
                 if let Ok(mut frames) = state.captures.lock() { frames.remove(&label); }
@@ -308,7 +307,16 @@ fn open_picker(app: &AppHandle, request: u64) -> Result<(), String> {
                 window.set_position(tauri::PhysicalPosition::new(x,y)).map_err(|e|e.to_string())?;
                 window.set_size(tauri::PhysicalSize::new(width,height)).map_err(|e|e.to_string())?;
             }
-            window.set_focus().map_err(|e|e.to_string())?;
+            // Only the screen under the cursor should take focus. Otherwise the
+            // last monitor steals the first confirmation click on another screen.
+            let cursor = window.cursor_position().map_err(|e| e.to_string())?;
+            let origin = window.inner_position().map_err(|e| e.to_string())?;
+            let size = window.inner_size().map_err(|e| e.to_string())?;
+            if cursor.x >= origin.x as f64 && cursor.y >= origin.y as f64
+                && cursor.x < origin.x as f64 + size.width as f64
+                && cursor.y < origin.y as f64 + size.height as f64 {
+                window.set_focus().map_err(|e|e.to_string())?;
+            }
         }
         Ok(())
     })();
@@ -320,6 +328,23 @@ fn open_picker(app: &AppHandle, request: u64) -> Result<(), String> {
 async fn start_picker(app: AppHandle) -> Result<(), String> {
     let request=next_picker_request(&app);
     tauri::async_runtime::spawn_blocking(move || open_picker(&app,request)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn picker_pointer(window: tauri::WebviewWindow) -> Result<Option<(f64, f64)>, String> {
+    // Native coordinates are physical pixels on both platforms. Normalize against
+    // the actual window bounds so Retina and Windows display scaling agree with CSS.
+    tauri::async_runtime::spawn_blocking(move || {
+        let cursor = window.cursor_position().map_err(|e| e.to_string())?;
+        let origin = window.inner_position().map_err(|e| e.to_string())?;
+        let size = window.inner_size().map_err(|e| e.to_string())?;
+        let x = cursor.x - origin.x as f64;
+        let y = cursor.y - origin.y as f64;
+        if size.width == 0 || size.height == 0 || x < 0.0 || y < 0.0 || x >= size.width as f64 || y >= size.height as f64 {
+            return Ok(None);
+        }
+        Ok(Some((x / size.width as f64, y / size.height as f64)))
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -385,7 +410,7 @@ pub fn run(){
             Ok(())
         })
         .on_window_event(|window,event|if window.label()=="main"{if let tauri::WindowEvent::CloseRequested{api,..}=event{api.prevent_close();let _=hide_main(window.app_handle());}})
-        .invoke_handler(tauri::generate_handler![get_state,update_preferences,save_shortcut,start_picker,sample_color,confirm_color,cancel_picker,clear_history,delete_history,copy_value])
+        .invoke_handler(tauri::generate_handler![get_state,update_preferences,save_shortcut,start_picker,picker_pointer,sample_color,confirm_color,cancel_picker,clear_history,delete_history,copy_value])
         .run(tauri::generate_context!()).expect("取色鸭启动失败");
 }
 
