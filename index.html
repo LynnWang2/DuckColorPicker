@@ -15,12 +15,13 @@
       <p id="hint">启动后移动鼠标并单击取色，按 Esc 取消</p>
     </section>
     <section class="latest hidden" id="latest">
-      <div class="latestTop"><div class="swatch" id="latestSwatch"></div><div class="latestName"><b id="latestName"></b><span>已自动复制 HEX（不含 #）</span></div></div>
+      <div class="latestTop"><div class="swatch" id="latestSwatch"></div><div class="latestName"><b id="latestName"></b><span id="latestCopyHint">已自动复制 HEX（不含 #）</span></div></div>
       <div id="latestValues" class="valueList"></div>
     </section>
     <section class="panel settingsPanel">
       <div class="settingRow"><div><h2>快捷键</h2><p>点击后按下新的组合键</p></div><input id="shortcut" readonly aria-label="取色快捷键"></div>
       <div class="settingRow"><div><h2>外观</h2><p>可自动跟随系统深浅色</p></div><select id="theme"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></div>
+      <div class="settingRow"><div><h2>取色后自动复制</h2><p>可选择默认复制的色值格式</p></div><select id="copyFormat"><option value="hex">HEX（不含 #）</option><option value="rgb">RGB</option><option value="hsl">HSL</option><option value="cmyk">CMYK</option></select></div>
       <label class="settingRow switchRow"><div><h2>随系统启动</h2><p>开机后在托盘中运行</p></div><input id="autoStart" type="checkbox"><span class="switch"></span></label>
       <div class="formatSetting"><div><h2>显示色值</h2><p>可只显示你常用的格式</p></div><div class="formatChecks">
         <label><input type="checkbox" data-format="hex"><span>HEX</span></label>

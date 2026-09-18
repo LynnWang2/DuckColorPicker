@@ -9,7 +9,7 @@
 - 跟随鼠标的颜色卡片，单击确认，`Esc` 取消
 - 显示普通中文颜色名，不使用传统色名
 - HEX、RGB、HSL、CMYK 可自由勾选
-- HEX 显示包含 `#`，复制自动移除 `#`
+- 可指定取色后自动复制 HEX、RGB、HSL 或 CMYK，默认 HEX；HEX 显示包含 `#`，复制自动移除 `#`
 - 最近 24 次取色历史
 - 跟随系统、浅色、深色三种外观
 - 系统托盘和随系统启动
@@ -53,4 +53,3 @@ npm run build
 - `src-tauri/src/lib.rs`：屏幕捕获、像素采样、快捷键、托盘、剪贴板、历史记录
 - `src-tauri/tauri.conf.json`：Windows/macOS 安装包配置
 - `.github/workflows/build.yml`：双平台自动构建
-
