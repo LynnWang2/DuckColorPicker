@@ -5,6 +5,7 @@ use std::{
     fs,
     path::PathBuf,
     sync::{atomic::{AtomicBool, Ordering}, Mutex},
+    time::Duration,
 };
 use tauri::{
     menu::{Menu, MenuItem},
@@ -150,6 +151,37 @@ fn close_pickers(app: &AppHandle) {
     state.picking.store(false, Ordering::SeqCst);
 }
 
+#[cfg(target_os = "macos")]
+fn ensure_screen_capture_permission() -> Result<(), String> {
+    static REQUESTED_THIS_RUN: AtomicBool = AtomicBool::new(false);
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGPreflightScreenCaptureAccess() -> bool;
+        fn CGRequestScreenCaptureAccess() -> bool;
+    }
+    if unsafe { CGPreflightScreenCaptureAccess() } { return Ok(()); }
+    // Request at most once per launch. Repeated calls can show a system dialog
+    // every time the picker opens when an unsigned build has a stale TCC grant.
+    if !REQUESTED_THIS_RUN.swap(true, Ordering::SeqCst) {
+        unsafe { CGRequestScreenCaptureAccess(); }
+    }
+    Err("请在系统设置 → 隐私与安全性 → 屏幕与系统音频录制中允许当前版本的取色鸭，然后完全退出并重新打开应用".into())
+}
+
+fn show_copied_toast(app: &AppHandle, hex: &str) {
+    if let Some(existing) = app.get_webview_window("copied-toast") { let _ = existing.close(); }
+    let url = format!("toast.html?hex={}", hex.trim_start_matches('#'));
+    if let Ok(window) = WebviewWindowBuilder::new(app, "copied-toast", WebviewUrl::App(url.into()))
+        .title("已复制色值").decorations(false).transparent(true).shadow(false)
+        .always_on_top(true).skip_taskbar(true).focused(false)
+        .inner_size(240.0, 52.0).center().build() {
+        tauri::async_runtime::spawn_blocking(move || {
+            std::thread::sleep(Duration::from_millis(1700));
+            let _ = window.close();
+        });
+    }
+}
+
 #[tauri::command]
 fn get_state(state: State<AppState>) -> Result<Settings, String> { state.settings.lock().map(|v| v.clone()).map_err(|_| "设置被占用".into()) }
 
@@ -173,6 +205,11 @@ fn open_picker(app: &AppHandle) -> Result<(), String> {
     if state.picking.swap(true, Ordering::SeqCst) { return Ok(()); }
     close_pickers(app); state.picking.store(true,Ordering::SeqCst);
     let result=(|| {
+        #[cfg(target_os = "macos")]
+        ensure_screen_capture_permission()?;
+        if let Some(main) = app.get_webview_window("main") { main.hide().map_err(|e| e.to_string())?; }
+        // Give the compositor time to remove the main window before taking the snapshot.
+        std::thread::sleep(Duration::from_millis(180));
         let monitors=Monitor::all().map_err(|e| format!("无法读取屏幕：{e}"))?;
         if monitors.is_empty(){return Err("没有检测到显示器".into());}
         let mut frames=state.captures.lock().map_err(|_| "取色缓存被占用")?;
@@ -180,9 +217,11 @@ fn open_picker(app: &AppHandle) -> Result<(), String> {
             let image=monitor.capture_image().map_err(|e| format!("无法截取屏幕，请授予屏幕录制权限：{e}"))?;
             let label=format!("picker-{index}"); let width=image.width(); let height=image.height();
             let x=monitor.x().map_err(|e|e.to_string())? as f64; let y=monitor.y().map_err(|e|e.to_string())? as f64;
+            let view_width=monitor.width().map_err(|e|e.to_string())? as f64;
+            let view_height=monitor.height().map_err(|e|e.to_string())? as f64;
             WebviewWindowBuilder::new(app,&label,WebviewUrl::App("picker.html".into()))
-                .title("取色鸭").decorations(false).transparent(true).always_on_top(true).skip_taskbar(true)
-                .position(x,y).inner_size(width as f64,height as f64).focused(true).build().map_err(|e|e.to_string())?;
+                .title("取色鸭").decorations(false).transparent(true).shadow(false).always_on_top(true).skip_taskbar(true)
+                .position(x,y).inner_size(view_width,view_height).focused(true).build().map_err(|e|e.to_string())?;
             frames.insert(label,CaptureFrame{width,height,rgba:image.into_raw()});
         }
         Ok(())
@@ -209,7 +248,7 @@ fn sample_color(state: State<AppState>, window_label: String, local_x: f64, loca
 fn confirm_color(app:AppHandle,state:State<AppState>,r:u8,g:u8,b:u8)->Result<(),String>{
     let color=sample(r,g,b); let record=ColorRecord{id:Uuid::new_v4().to_string(),timestamp:std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis()as u64,r,g,b,hex:color.hex.clone(),rgb:color.rgb.clone(),hsl:color.hsl.clone(),cmyk:color.cmyk.clone(),name:color.name.clone()};
     Clipboard::new().and_then(|mut c|c.set_text(color.hex.trim_start_matches('#'))).map_err(|e|format!("复制失败：{e}"))?;
-    {let mut s=state.settings.lock().map_err(|_|"设置被占用")?;s.history.insert(0,record.clone());s.history.truncate(24);} save(&state)?;close_pickers(&app);emit_state(&app,&state)?;app.emit("picker-result",record).map_err(|e|e.to_string())
+    {let mut s=state.settings.lock().map_err(|_|"设置被占用")?;s.history.insert(0,record.clone());s.history.truncate(24);} save(&state)?;close_pickers(&app);emit_state(&app,&state)?;show_copied_toast(&app,&record.hex);app.emit("picker-result",record).map_err(|e|e.to_string())
 }
 
 #[tauri::command]

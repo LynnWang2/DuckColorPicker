@@ -9,7 +9,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(import.meta.dirname, 'index.html'),
-        picker: resolve(import.meta.dirname, 'picker.html')
+        picker: resolve(import.meta.dirname, 'picker.html'),
+        toast: resolve(import.meta.dirname, 'toast.html')
       }
     }
   }
