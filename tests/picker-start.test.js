@@ -24,7 +24,7 @@ async function pickerHarness(points) {
       if(command==='sample_color')return {hex:'#123456',name:'蓝色'};
     }
   };
-  vm.runInNewContext(fs.readFileSync('src/picker.js','utf8').replace(/^import .*;\n/gm,''),context);
+  vm.runInNewContext(fs.readFileSync('src/picker.js','utf8').replace(/^import .*;\r?\n/gm,''),context);
   const settle=()=>new Promise(resolve=>setImmediate(resolve));
   await settle();
   return {calls,classes,elements,listeners,timers,async tick(){const pending=[...timers.values()];timers.clear();for(const fn of pending)await fn();await settle()}};
