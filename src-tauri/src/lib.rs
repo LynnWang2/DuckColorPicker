@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     fs,
     path::PathBuf,
-    sync::{atomic::{AtomicBool, Ordering}, Mutex},
+    sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Mutex},
     time::Duration,
 };
 use tauri::{
@@ -74,6 +74,8 @@ struct CaptureFrame { width: u32, height: u32, rgba: Vec<u8> }
 struct AppState {
     settings: Mutex<Settings>,
     captures: Mutex<HashMap<String, CaptureFrame>>,
+    picker_lifecycle: Mutex<()>,
+    picker_generation: AtomicU64,
     picking: AtomicBool,
     data_path: PathBuf,
 }
@@ -185,6 +187,8 @@ fn hide_main(app: &AppHandle) -> Result<(), String> {
 
 fn close_pickers(app: &AppHandle) {
     let state = app.state::<AppState>();
+    state.picker_generation.fetch_add(1, Ordering::SeqCst);
+    let Ok(_lifecycle) = state.picker_lifecycle.lock() else { return; };
     let labels: Vec<_> = app.webview_windows().keys().filter(|k| k.starts_with("picker-")).cloned().collect();
     for label in labels { if let Some(window) = app.get_webview_window(&label) { let _ = window.close(); } }
     if let Ok(mut frames) = state.captures.lock() { frames.clear(); }
@@ -239,8 +243,16 @@ fn save_shortcut(app: AppHandle, state: State<AppState>, shortcut: String) -> Re
     state.settings.lock().map_err(|_| "设置被占用")?.shortcut=shortcut; save(&state)?; emit_state(&app,&state)
 }
 
-fn open_picker(app: &AppHandle) -> Result<(), String> {
+fn next_picker_request(app: &AppHandle) -> u64 {
+    let state=app.state::<AppState>();
+    if state.picking.load(Ordering::SeqCst) { return state.picker_generation.load(Ordering::SeqCst); }
+    state.picker_generation.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+fn open_picker(app: &AppHandle, request: u64) -> Result<(), String> {
     let state = app.state::<AppState>();
+    let lifecycle = state.picker_lifecycle.lock().map_err(|_| "取色状态被占用")?;
+    if request != state.picker_generation.load(Ordering::SeqCst) { return Ok(()); }
     if state.picking.swap(true, Ordering::SeqCst) { return Ok(()); }
     if let Ok(mut frames) = state.captures.lock() { frames.clear(); }
     let result=(|| {
@@ -253,9 +265,9 @@ fn open_picker(app: &AppHandle) -> Result<(), String> {
         if monitors.is_empty(){return Err("没有检测到显示器".into());}
         let mut frames=state.captures.lock().map_err(|_| "取色缓存被占用")?;
         for (index,monitor) in monitors.into_iter().enumerate(){
-            if !state.picking.load(Ordering::SeqCst) { return Ok(()); }
+            if request != state.picker_generation.load(Ordering::SeqCst) { return Ok(()); }
             let image=monitor.capture_image().map_err(|e| format!("无法截取屏幕，请授予屏幕录制权限：{e}"))?;
-            if !state.picking.load(Ordering::SeqCst) { return Ok(()); }
+            if request != state.picker_generation.load(Ordering::SeqCst) { return Ok(()); }
             let label=format!("picker-{index}"); let width=image.width(); let height=image.height();
             let x=monitor.x().map_err(|e|e.to_string())? as f64; let y=monitor.y().map_err(|e|e.to_string())? as f64;
             let view_width=monitor.width().map_err(|e|e.to_string())? as f64;
@@ -282,13 +294,15 @@ fn open_picker(app: &AppHandle) -> Result<(), String> {
         }
         Ok(())
     })();
+    drop(lifecycle);
     if result.is_err(){ close_pickers(app); let _ = show_main(app); }
     result
 }
 
 #[tauri::command]
 async fn start_picker(app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || open_picker(&app)).await.map_err(|e| e.to_string())?
+    let request=next_picker_request(&app);
+    tauri::async_runtime::spawn_blocking(move || open_picker(&app,request)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -326,13 +340,13 @@ pub fn run(){
         // Configure autostart here: this plugin accepts no JSON object configuration.
         // Adding plugins.autostart to tauri.conf.json aborts startup on both platforms.
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
-        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app,_shortcut,event|{if event.state()==ShortcutState::Pressed{let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app);});}}).build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app,_shortcut,event|{if event.state()==ShortcutState::Pressed{let request=next_picker_request(app);let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request);});}}).build())
         .setup(|app|{
             let data_path=app.path().app_data_dir()?.join("settings.json"); let settings: Settings=fs::read(&data_path).ok().and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or_default();
-            let shortcut=settings.shortcut.clone(); app.manage(AppState{settings:Mutex::new(settings),captures:Mutex::new(HashMap::new()),picking:AtomicBool::new(false),data_path});
+            let shortcut=settings.shortcut.clone(); app.manage(AppState{settings:Mutex::new(settings),captures:Mutex::new(HashMap::new()),picker_lifecycle:Mutex::new(()),picker_generation:AtomicU64::new(0),picking:AtomicBool::new(false),data_path});
             app.global_shortcut().register(shortcut.as_str())?;
             let show=MenuItem::with_id(app,"show","打开取色鸭",true,None::<&str>)?;let pick=MenuItem::with_id(app,"pick","开始取色",true,None::<&str>)?;let quit=MenuItem::with_id(app,"quit","退出",true,None::<&str>)?;let menu=Menu::with_items(app,&[&show,&pick,&quit])?;
-            let tray=TrayIconBuilder::new().icon(app.default_window_icon().unwrap().clone()).tooltip("取色鸭 · Duck Color Picker").menu(&menu).on_menu_event(|app,event|match event.id.as_ref(){"show"=>{let _=show_main(app);},"pick"=>{let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app);});},"quit"=>app.exit(0),_=>{}});
+            let tray=TrayIconBuilder::new().icon(app.default_window_icon().unwrap().clone()).tooltip("取色鸭 · Duck Color Picker").menu(&menu).on_menu_event(|app,event|match event.id.as_ref(){"show"=>{let _=show_main(app);},"pick"=>{let request=next_picker_request(app);let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request);});},"quit"=>app.exit(0),_=>{}});
             #[cfg(target_os = "windows")]
             let tray=tray.show_menu_on_left_click(false).on_tray_icon_event(|tray,event|if let TrayIconEvent::Click{button:MouseButton::Left,button_state:MouseButtonState::Up,..}=event{let _=show_main(tray.app_handle());});
             tray.build(app)?;
