@@ -4,14 +4,17 @@ use std::{
     collections::HashMap,
     fs,
     path::PathBuf,
-    sync::{atomic::{AtomicBool, Ordering}, Mutex},
+    sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Mutex},
+    time::Duration,
 };
 use tauri::{
     menu::{Menu, MenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    tray::TrayIconBuilder,
     AppHandle, Emitter, Manager, State, WebviewUrl,
     WebviewWindowBuilder,
 };
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use uuid::Uuid;
@@ -46,6 +49,8 @@ struct Settings {
     shortcut: String,
     theme: String,
     formats: Formats,
+    #[serde(default)]
+    copy_format: CopyFormat,
     auto_start: bool,
     history: Vec<ColorRecord>,
 }
@@ -56,6 +61,7 @@ impl Default for Settings {
             shortcut: "CommandOrControl+Shift+C".into(),
             theme: "system".into(),
             formats: Formats::default(),
+            copy_format: CopyFormat::default(),
             auto_start: false,
             history: vec![],
         }
@@ -68,13 +74,30 @@ struct CaptureFrame { width: u32, height: u32, rgba: Vec<u8> }
 struct AppState {
     settings: Mutex<Settings>,
     captures: Mutex<HashMap<String, CaptureFrame>>,
+    picker_generation: AtomicU64,
+    toast_generation: AtomicU64,
     picking: AtomicBool,
     data_path: PathBuf,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Preferences { theme: Option<String>, formats: Option<Formats>, auto_start: Option<bool> }
+struct Preferences { theme: Option<String>, formats: Option<Formats>, copy_format: Option<CopyFormat>, auto_start: Option<bool> }
+
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum CopyFormat { #[default] Hex, Rgb, Hsl, Cmyk }
+
+impl CopyFormat {
+    fn label(self) -> &'static str { match self { Self::Hex => "HEX", Self::Rgb => "RGB", Self::Hsl => "HSL", Self::Cmyk => "CMYK" } }
+    fn value<'a>(self, color: &'a SampleColor) -> &'a str {
+        match self { Self::Hex => color.hex.trim_start_matches('#'), Self::Rgb => &color.rgb, Self::Hsl => &color.hsl, Self::Cmyk => &color.cmyk }
+    }
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PickerResult { color: ColorRecord, copied_format: CopyFormat, copied_value: String }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -142,12 +165,73 @@ fn emit_state(app: &AppHandle, state: &AppState) -> Result<(), String> {
     app.emit("state-changed", value).map_err(|e| e.to_string())
 }
 
+fn show_main(app: &AppHandle) -> Result<(), String> {
+    close_pickers(app);
+    #[cfg(target_os = "macos")]
+    app.set_activation_policy(tauri::ActivationPolicy::Regular).map_err(|e| e.to_string())?;
+    if let Some(window) = app.get_webview_window("main") {
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn hide_main(app: &AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.hide().map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    app.set_activation_policy(tauri::ActivationPolicy::Accessory).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn close_pickers(app: &AppHandle) {
     let state = app.state::<AppState>();
+    state.picker_generation.fetch_add(1, Ordering::SeqCst);
     let labels: Vec<_> = app.webview_windows().keys().filter(|k| k.starts_with("picker-")).cloned().collect();
     for label in labels { if let Some(window) = app.get_webview_window(&label) { let _ = window.close(); } }
     if let Ok(mut frames) = state.captures.lock() { frames.clear(); }
     state.picking.store(false, Ordering::SeqCst);
+    #[cfg(target_os = "macos")]
+    if app.get_webview_window("main").is_some_and(|window| !window.is_visible().unwrap_or(false)) {
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn ensure_screen_capture_permission() -> Result<(), String> {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGPreflightScreenCaptureAccess() -> bool;
+    }
+    if unsafe { CGPreflightScreenCaptureAccess() } { return Ok(()); }
+    // Do not call CGRequestScreenCaptureAccess while picking: on an unsigned
+    // build with a stale TCC grant, macOS may show its dialog on every attempt.
+    Err("当前安装的取色鸭尚未获得有效录屏权限。请在系统设置 → 隐私与安全性 → 屏幕与系统音频录制中重新添加并允许当前版本，然后完全退出并重新打开应用".into())
+}
+
+fn show_copied_toast(app: &AppHandle, format: CopyFormat) {
+    let generation=app.state::<AppState>().toast_generation.fetch_add(1,Ordering::SeqCst)+1;
+    let window=if let Some(existing)=app.get_webview_window("copied-toast") {
+        let _=app.emit_to("copied-toast","copied-toast-update",format.label());
+        let _=existing.show();
+        Some(existing)
+    } else {
+        let url = format!("toast.html?format={}", format.label());
+        WebviewWindowBuilder::new(app, "copied-toast", WebviewUrl::App(url.into()))
+            .title("已复制色值").decorations(false).transparent(true).shadow(false)
+            .always_on_top(true).skip_taskbar(true).focused(false)
+            .inner_size(390.0, 52.0).center().build().ok()
+    };
+    if let Some(window)=window {
+        let app=app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            std::thread::sleep(Duration::from_millis(1700));
+            if app.state::<AppState>().toast_generation.load(Ordering::SeqCst)==generation {
+                let _ = window.hide();
+            }
+        });
+    }
 }
 
 #[tauri::command]
@@ -155,7 +239,7 @@ fn get_state(state: State<AppState>) -> Result<Settings, String> { state.setting
 
 #[tauri::command]
 fn update_preferences(app: AppHandle, state: State<AppState>, preferences: Preferences) -> Result<(), String> {
-    { let mut s=state.settings.lock().map_err(|_| "设置被占用")?; if let Some(v)=preferences.theme {s.theme=v;} if let Some(v)=preferences.formats{s.formats=v;} if let Some(v)=preferences.auto_start{s.auto_start=v;} }
+    { let mut s=state.settings.lock().map_err(|_| "设置被占用")?; if let Some(v)=preferences.theme {s.theme=v;} if let Some(v)=preferences.formats{s.formats=v;} if let Some(v)=preferences.copy_format{s.copy_format=v;} if let Some(v)=preferences.auto_start{s.auto_start=v;} }
     save(&state)?; emit_state(&app,&state)
 }
 
@@ -168,32 +252,99 @@ fn save_shortcut(app: AppHandle, state: State<AppState>, shortcut: String) -> Re
     state.settings.lock().map_err(|_| "设置被占用")?.shortcut=shortcut; save(&state)?; emit_state(&app,&state)
 }
 
-fn open_picker(app: &AppHandle) -> Result<(), String> {
+fn next_picker_request(app: &AppHandle) -> u64 {
+    let state=app.state::<AppState>();
+    if state.picking.load(Ordering::SeqCst) { return state.picker_generation.load(Ordering::SeqCst); }
+    state.picker_generation.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+fn open_picker(app: &AppHandle, request: u64) -> Result<(), String> {
     let state = app.state::<AppState>();
+    if request != state.picker_generation.load(Ordering::SeqCst) { return Ok(()); }
     if state.picking.swap(true, Ordering::SeqCst) { return Ok(()); }
-    close_pickers(app); state.picking.store(true,Ordering::SeqCst);
+    if let Ok(mut frames) = state.captures.lock() { frames.clear(); }
     let result=(|| {
+        #[cfg(target_os = "macos")]
+        ensure_screen_capture_permission()?;
+        let main_was_visible = app.get_webview_window("main").is_some_and(|window| window.is_visible().unwrap_or(false));
+        hide_main(app)?;
+        // Give the compositor time to remove the main window before taking the snapshot.
+        if main_was_visible { std::thread::sleep(Duration::from_millis(180)); }
         let monitors=Monitor::all().map_err(|e| format!("无法读取屏幕：{e}"))?;
         if monitors.is_empty(){return Err("没有检测到显示器".into());}
-        let mut frames=state.captures.lock().map_err(|_| "取色缓存被占用")?;
         for (index,monitor) in monitors.into_iter().enumerate(){
+            if request != state.picker_generation.load(Ordering::SeqCst) { return Ok(()); }
             let image=monitor.capture_image().map_err(|e| format!("无法截取屏幕，请授予屏幕录制权限：{e}"))?;
+            if request != state.picker_generation.load(Ordering::SeqCst) { return Ok(()); }
             let label=format!("picker-{index}"); let width=image.width(); let height=image.height();
             let x=monitor.x().map_err(|e|e.to_string())? as f64; let y=monitor.y().map_err(|e|e.to_string())? as f64;
-            WebviewWindowBuilder::new(app,&label,WebviewUrl::App("picker.html".into()))
-                .title("取色鸭").decorations(false).transparent(true).always_on_top(true).skip_taskbar(true)
-                .position(x,y).inner_size(width as f64,height as f64).focused(true).build().map_err(|e|e.to_string())?;
-            frames.insert(label,CaptureFrame{width,height,rgba:image.into_raw()});
+            let view_width=monitor.width().map_err(|e|e.to_string())? as f64;
+            let view_height=monitor.height().map_err(|e|e.to_string())? as f64;
+            #[cfg(target_os = "windows")]
+            let physical_bounds=(x as i32,y as i32,view_width as u32,view_height as u32);
+            #[cfg(target_os = "windows")]
+            let (x,y,view_width,view_height) = {
+                let scale = monitor.scale_factor().map_err(|e|e.to_string())? as f64;
+                (x / scale, y / scale, view_width / scale, view_height / scale)
+            };
+            state.captures.lock().map_err(|_| "取色缓存被占用")?
+                .insert(label.clone(),CaptureFrame{width,height,rgba:image.into_raw()});
+            if request != state.picker_generation.load(Ordering::SeqCst) {
+                if let Ok(mut frames) = state.captures.lock() { frames.remove(&label); }
+                return Ok(());
+            }
+            let window=WebviewWindowBuilder::new(app,&label,WebviewUrl::App("picker.html".into()))
+                .title("取色鸭").decorations(false).transparent(true).shadow(false).always_on_top(true).skip_taskbar(true)
+                .position(x,y).inner_size(view_width,view_height).accept_first_mouse(true).focused(false).build().map_err(|e|e.to_string())?;
+            if request != state.picker_generation.load(Ordering::SeqCst) {
+                let _ = window.close();
+                if let Ok(mut frames) = state.captures.lock() { frames.remove(&label); }
+                return Ok(());
+            }
+            #[cfg(target_os = "windows")]
+            {
+                let (x,y,width,height)=physical_bounds;
+                window.set_position(tauri::PhysicalPosition::new(x,y)).map_err(|e|e.to_string())?;
+                window.set_size(tauri::PhysicalSize::new(width,height)).map_err(|e|e.to_string())?;
+            }
+            // Only the screen under the cursor should take focus. Otherwise the
+            // last monitor steals the first confirmation click on another screen.
+            let cursor = window.cursor_position().map_err(|e| e.to_string())?;
+            let origin = window.inner_position().map_err(|e| e.to_string())?;
+            let size = window.inner_size().map_err(|e| e.to_string())?;
+            if cursor.x >= origin.x as f64 && cursor.y >= origin.y as f64
+                && cursor.x < origin.x as f64 + size.width as f64
+                && cursor.y < origin.y as f64 + size.height as f64 {
+                window.set_focus().map_err(|e|e.to_string())?;
+            }
         }
         Ok(())
     })();
-    if result.is_err(){ close_pickers(app); }
+    if result.is_err(){ close_pickers(app); let _ = show_main(app); }
     result
 }
 
 #[tauri::command]
 async fn start_picker(app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || open_picker(&app)).await.map_err(|e| e.to_string())?
+    let request=next_picker_request(&app);
+    tauri::async_runtime::spawn_blocking(move || open_picker(&app,request)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn picker_pointer(window: tauri::WebviewWindow) -> Result<Option<(f64, f64)>, String> {
+    // Native coordinates are physical pixels on both platforms. Normalize against
+    // the actual window bounds so Retina and Windows display scaling agree with CSS.
+    tauri::async_runtime::spawn_blocking(move || {
+        let cursor = window.cursor_position().map_err(|e| e.to_string())?;
+        let origin = window.inner_position().map_err(|e| e.to_string())?;
+        let size = window.inner_size().map_err(|e| e.to_string())?;
+        let x = cursor.x - origin.x as f64;
+        let y = cursor.y - origin.y as f64;
+        if size.width == 0 || size.height == 0 || x < 0.0 || y < 0.0 || x >= size.width as f64 || y >= size.height as f64 {
+            return Ok(None);
+        }
+        Ok(Some((x / size.width as f64, y / size.height as f64)))
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -208,12 +359,28 @@ fn sample_color(state: State<AppState>, window_label: String, local_x: f64, loca
 #[tauri::command]
 fn confirm_color(app:AppHandle,state:State<AppState>,r:u8,g:u8,b:u8)->Result<(),String>{
     let color=sample(r,g,b); let record=ColorRecord{id:Uuid::new_v4().to_string(),timestamp:std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis()as u64,r,g,b,hex:color.hex.clone(),rgb:color.rgb.clone(),hsl:color.hsl.clone(),cmyk:color.cmyk.clone(),name:color.name.clone()};
-    Clipboard::new().and_then(|mut c|c.set_text(color.hex.trim_start_matches('#'))).map_err(|e|format!("复制失败：{e}"))?;
-    {let mut s=state.settings.lock().map_err(|_|"设置被占用")?;s.history.insert(0,record.clone());s.history.truncate(24);} save(&state)?;close_pickers(&app);emit_state(&app,&state)?;app.emit("picker-result",record).map_err(|e|e.to_string())
+    let copy_format=state.settings.lock().map_err(|_|"设置被占用")?.copy_format;
+    let copied_value=copy_format.value(&color).to_string();
+    Clipboard::new().and_then(|mut c|c.set_text(&copied_value)).map_err(|e|format!("复制失败：{e}"))?;
+    {let mut s=state.settings.lock().map_err(|_|"设置被占用")?;s.history.insert(0,record.clone());s.history.truncate(24);}
+    save(&state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        close_pickers(&app);
+        let _ = emit_state(&app, &app.state::<AppState>());
+        show_copied_toast(&app, copy_format);
+        let _ = app.emit("picker-result",PickerResult{color:record,copied_format:copy_format,copied_value});
+    });
+    Ok(())
 }
 
 #[tauri::command]
-fn cancel_picker(app:AppHandle)->Result<(),String>{close_pickers(&app);app.emit("picker-cancelled",()).map_err(|e|e.to_string())}
+fn cancel_picker(app:AppHandle)->Result<(),String>{
+    tauri::async_runtime::spawn_blocking(move || {
+        close_pickers(&app);
+        let _ = app.emit("picker-cancelled",());
+    });
+    Ok(())
+}
 
 #[tauri::command]
 fn clear_history(app:AppHandle,state:State<AppState>)->Result<(),String>{state.settings.lock().map_err(|_|"设置被占用")?.history.clear();save(&state)?;emit_state(&app,&state)}
@@ -226,18 +393,46 @@ fn copy_value(value:String)->Result<(),String>{Clipboard::new().and_then(|mut c|
 
 pub fn run(){
     tauri::Builder::default()
+        // Configure autostart here: this plugin accepts no JSON object configuration.
+        // Adding plugins.autostart to tauri.conf.json aborts startup on both platforms.
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
-        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app,_shortcut,event|{if event.state()==ShortcutState::Pressed{let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app);});}}).build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app,_shortcut,event|{if event.state()==ShortcutState::Pressed{let request=next_picker_request(app);let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request);});}}).build())
         .setup(|app|{
             let data_path=app.path().app_data_dir()?.join("settings.json"); let settings: Settings=fs::read(&data_path).ok().and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or_default();
-            let shortcut=settings.shortcut.clone(); app.manage(AppState{settings:Mutex::new(settings),captures:Mutex::new(HashMap::new()),picking:AtomicBool::new(false),data_path});
+            let shortcut=settings.shortcut.clone(); app.manage(AppState{settings:Mutex::new(settings),captures:Mutex::new(HashMap::new()),picker_generation:AtomicU64::new(0),toast_generation:AtomicU64::new(0),picking:AtomicBool::new(false),data_path});
             app.global_shortcut().register(shortcut.as_str())?;
             let show=MenuItem::with_id(app,"show","打开取色鸭",true,None::<&str>)?;let pick=MenuItem::with_id(app,"pick","开始取色",true,None::<&str>)?;let quit=MenuItem::with_id(app,"quit","退出",true,None::<&str>)?;let menu=Menu::with_items(app,&[&show,&pick,&quit])?;
-            TrayIconBuilder::new().icon(app.default_window_icon().unwrap().clone()).tooltip("取色鸭 · Duck Color Picker").menu(&menu).on_menu_event(|app,event|match event.id.as_ref(){"show"=>{if let Some(w)=app.get_webview_window("main"){let _=w.show();let _=w.set_focus();}},"pick"=>{let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app);});},"quit"=>app.exit(0),_=>{}}).on_tray_icon_event(|tray,event|if let TrayIconEvent::Click{button:MouseButton::Left,button_state:MouseButtonState::Up,..}=event{let app=tray.app_handle();if let Some(w)=app.get_webview_window("main"){let _=w.show();let _=w.set_focus();}}).build(app)?;
-            if !std::env::args().any(|v|v=="--hidden"){if let Some(w)=app.get_webview_window("main"){w.show()?;}}
+            let tray=TrayIconBuilder::new().icon(app.default_window_icon().unwrap().clone()).tooltip("取色鸭 · Duck Color Picker").menu(&menu).on_menu_event(|app,event|match event.id.as_ref(){"show"=>{let _=show_main(app);},"pick"=>{let request=next_picker_request(app);let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request);});},"quit"=>app.exit(0),_=>{}});
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            let tray=tray.show_menu_on_left_click(false).on_tray_icon_event(|tray,event|if let TrayIconEvent::Click{button:MouseButton::Left,button_state:MouseButtonState::Up,..}=event{let _=show_main(tray.app_handle());});
+            tray.build(app)?;
+            if !std::env::args().any(|v|v=="--hidden"){show_main(app.handle()).map_err(std::io::Error::other)?;} else {hide_main(app.handle()).map_err(std::io::Error::other)?;}
             Ok(())
         })
-        .on_window_event(|window,event|if window.label()=="main"{if let tauri::WindowEvent::CloseRequested{api,..}=event{api.prevent_close();let _=window.hide();}})
-        .invoke_handler(tauri::generate_handler![get_state,update_preferences,save_shortcut,start_picker,sample_color,confirm_color,cancel_picker,clear_history,delete_history,copy_value])
+        .on_window_event(|window,event|if window.label()=="main"{if let tauri::WindowEvent::CloseRequested{api,..}=event{api.prevent_close();let _=hide_main(window.app_handle());}})
+        .invoke_handler(tauri::generate_handler![get_state,update_preferences,save_shortcut,start_picker,picker_pointer,sample_color,confirm_color,cancel_picker,clear_history,delete_history,copy_value])
         .run(tauri::generate_context!()).expect("取色鸭启动失败");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_settings_keep_hex_as_default_copy_format() {
+        let old = r##"{"shortcut":"CommandOrControl+Shift+C","theme":"system","formats":{"hex":true,"rgb":true,"hsl":false,"cmyk":false},"autoStart":false,"history":[]}"##;
+        let settings: Settings = serde_json::from_str(old).unwrap();
+        assert!(matches!(settings.copy_format, CopyFormat::Hex));
+        let color = sample(255, 0, 0);
+        assert_eq!(settings.copy_format.value(&color), "FF0000");
+    }
+
+    #[test]
+    fn selected_copy_format_uses_its_own_color_value() {
+        let color = sample(255, 0, 0);
+        assert_eq!(CopyFormat::Rgb.value(&color), "rgb(255, 0, 0)");
+        assert_eq!(CopyFormat::Hsl.value(&color), "hsl(0, 100%, 50%)");
+        assert_eq!(CopyFormat::Cmyk.value(&color), "cmyk(0%, 100%, 100%, 0%)");
+        assert!(serde_json::from_str::<CopyFormat>("\"unknown\"").is_err());
+    }
 }
