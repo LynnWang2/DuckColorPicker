@@ -153,19 +153,14 @@ fn close_pickers(app: &AppHandle) {
 
 #[cfg(target_os = "macos")]
 fn ensure_screen_capture_permission() -> Result<(), String> {
-    static REQUESTED_THIS_RUN: AtomicBool = AtomicBool::new(false);
     #[link(name = "CoreGraphics", kind = "framework")]
     unsafe extern "C" {
         fn CGPreflightScreenCaptureAccess() -> bool;
-        fn CGRequestScreenCaptureAccess() -> bool;
     }
     if unsafe { CGPreflightScreenCaptureAccess() } { return Ok(()); }
-    // Request at most once per launch. Repeated calls can show a system dialog
-    // every time the picker opens when an unsigned build has a stale TCC grant.
-    if !REQUESTED_THIS_RUN.swap(true, Ordering::SeqCst) {
-        unsafe { CGRequestScreenCaptureAccess(); }
-    }
-    Err("请在系统设置 → 隐私与安全性 → 屏幕与系统音频录制中允许当前版本的取色鸭，然后完全退出并重新打开应用".into())
+    // Do not call CGRequestScreenCaptureAccess while picking: on an unsigned
+    // build with a stale TCC grant, macOS may show its dialog on every attempt.
+    Err("当前安装的取色鸭尚未获得有效录屏权限。请在系统设置 → 隐私与安全性 → 屏幕与系统音频录制中重新添加并允许当前版本，然后完全退出并重新打开应用".into())
 }
 
 fn show_copied_toast(app: &AppHandle, hex: &str) {
