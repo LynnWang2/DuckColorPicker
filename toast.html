@@ -5,9 +5,5 @@
   body{display:grid;place-items:center}
   #message{background:rgba(35,35,39,.94);color:white;border-radius:12px;padding:11px 18px;font-size:13px;font-weight:600;white-space:nowrap}
 </style></head>
-<body><div id="message"></div><script>
-  const params=new URLSearchParams(location.search);
-  const format=params.get('format');
-  document.querySelector('#message').textContent=/^(HEX|RGB|HSL|CMYK)$/.test(format||'')?`已复制 ${format} 色值`:'已复制色值';
-</script></body>
+<body><div id="message"></div><script type="module" src="/src/toast.js"></script></body>
 </html>

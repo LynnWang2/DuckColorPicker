@@ -13,7 +13,7 @@ use tauri::{
     AppHandle, Emitter, Manager, State, WebviewUrl,
     WebviewWindowBuilder,
 };
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -74,8 +74,8 @@ struct CaptureFrame { width: u32, height: u32, rgba: Vec<u8> }
 struct AppState {
     settings: Mutex<Settings>,
     captures: Mutex<HashMap<String, CaptureFrame>>,
-    picker_lifecycle: Mutex<()>,
     picker_generation: AtomicU64,
+    toast_generation: AtomicU64,
     picking: AtomicBool,
     data_path: PathBuf,
 }
@@ -188,7 +188,6 @@ fn hide_main(app: &AppHandle) -> Result<(), String> {
 fn close_pickers(app: &AppHandle) {
     let state = app.state::<AppState>();
     state.picker_generation.fetch_add(1, Ordering::SeqCst);
-    let Ok(_lifecycle) = state.picker_lifecycle.lock() else { return; };
     let labels: Vec<_> = app.webview_windows().keys().filter(|k| k.starts_with("picker-")).cloned().collect();
     for label in labels { if let Some(window) = app.get_webview_window(&label) { let _ = window.close(); } }
     if let Ok(mut frames) = state.captures.lock() { frames.clear(); }
@@ -212,15 +211,25 @@ fn ensure_screen_capture_permission() -> Result<(), String> {
 }
 
 fn show_copied_toast(app: &AppHandle, format: CopyFormat) {
-    if let Some(existing) = app.get_webview_window("copied-toast") { let _ = existing.close(); }
-    let url = format!("toast.html?format={}", format.label());
-    if let Ok(window) = WebviewWindowBuilder::new(app, "copied-toast", WebviewUrl::App(url.into()))
-        .title("已复制色值").decorations(false).transparent(true).shadow(false)
-        .always_on_top(true).skip_taskbar(true).focused(false)
-        .inner_size(390.0, 52.0).center().build() {
+    let generation=app.state::<AppState>().toast_generation.fetch_add(1,Ordering::SeqCst)+1;
+    let window=if let Some(existing)=app.get_webview_window("copied-toast") {
+        let _=app.emit_to("copied-toast","copied-toast-update",format.label());
+        let _=existing.show();
+        Some(existing)
+    } else {
+        let url = format!("toast.html?format={}", format.label());
+        WebviewWindowBuilder::new(app, "copied-toast", WebviewUrl::App(url.into()))
+            .title("已复制色值").decorations(false).transparent(true).shadow(false)
+            .always_on_top(true).skip_taskbar(true).focused(false)
+            .inner_size(390.0, 52.0).center().build().ok()
+    };
+    if let Some(window)=window {
+        let app=app.clone();
         tauri::async_runtime::spawn_blocking(move || {
             std::thread::sleep(Duration::from_millis(1700));
-            let _ = window.close();
+            if app.state::<AppState>().toast_generation.load(Ordering::SeqCst)==generation {
+                let _ = window.hide();
+            }
         });
     }
 }
@@ -251,7 +260,6 @@ fn next_picker_request(app: &AppHandle) -> u64 {
 
 fn open_picker(app: &AppHandle, request: u64) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let lifecycle = state.picker_lifecycle.lock().map_err(|_| "取色状态被占用")?;
     if request != state.picker_generation.load(Ordering::SeqCst) { return Ok(()); }
     if state.picking.swap(true, Ordering::SeqCst) { return Ok(()); }
     if let Ok(mut frames) = state.captures.lock() { frames.clear(); }
@@ -259,11 +267,12 @@ fn open_picker(app: &AppHandle, request: u64) -> Result<(), String> {
         #[cfg(target_os = "macos")]
         ensure_screen_capture_permission()?;
         if let Some(window) = app.get_webview_window("main") { window.hide().map_err(|e| e.to_string())?; }
+        #[cfg(target_os = "macos")]
+        app.set_activation_policy(tauri::ActivationPolicy::Regular).map_err(|e| e.to_string())?;
         // Give the compositor time to remove the main window before taking the snapshot.
         std::thread::sleep(Duration::from_millis(180));
         let monitors=Monitor::all().map_err(|e| format!("无法读取屏幕：{e}"))?;
         if monitors.is_empty(){return Err("没有检测到显示器".into());}
-        let mut frames=state.captures.lock().map_err(|_| "取色缓存被占用")?;
         for (index,monitor) in monitors.into_iter().enumerate(){
             if request != state.picker_generation.load(Ordering::SeqCst) { return Ok(()); }
             let image=monitor.capture_image().map_err(|e| format!("无法截取屏幕，请授予屏幕录制权限：{e}"))?;
@@ -279,22 +288,30 @@ fn open_picker(app: &AppHandle, request: u64) -> Result<(), String> {
                 let scale = monitor.scale_factor().map_err(|e|e.to_string())? as f64;
                 (x / scale, y / scale, view_width / scale, view_height / scale)
             };
+            state.captures.lock().map_err(|_| "取色缓存被占用")?
+                .insert(label.clone(),CaptureFrame{width,height,rgba:image.into_raw()});
+            if request != state.picker_generation.load(Ordering::SeqCst) {
+                if let Ok(mut frames) = state.captures.lock() { frames.remove(&label); }
+                return Ok(());
+            }
             let window=WebviewWindowBuilder::new(app,&label,WebviewUrl::App("picker.html".into()))
                 .title("取色鸭").decorations(false).transparent(true).shadow(false).always_on_top(true).skip_taskbar(true)
                 .position(x,y).inner_size(view_width,view_height).focused(true).build().map_err(|e|e.to_string())?;
+            if request != state.picker_generation.load(Ordering::SeqCst) {
+                let _ = window.close();
+                if let Ok(mut frames) = state.captures.lock() { frames.remove(&label); }
+                return Ok(());
+            }
             #[cfg(target_os = "windows")]
             {
                 let (x,y,width,height)=physical_bounds;
                 window.set_position(tauri::PhysicalPosition::new(x,y)).map_err(|e|e.to_string())?;
                 window.set_size(tauri::PhysicalSize::new(width,height)).map_err(|e|e.to_string())?;
             }
-            #[cfg(not(target_os = "windows"))]
-            let _ = window;
-            frames.insert(label,CaptureFrame{width,height,rgba:image.into_raw()});
+            window.set_focus().map_err(|e|e.to_string())?;
         }
         Ok(())
     })();
-    drop(lifecycle);
     if result.is_err(){ close_pickers(app); let _ = show_main(app); }
     result
 }
@@ -320,11 +337,25 @@ fn confirm_color(app:AppHandle,state:State<AppState>,r:u8,g:u8,b:u8)->Result<(),
     let copy_format=state.settings.lock().map_err(|_|"设置被占用")?.copy_format;
     let copied_value=copy_format.value(&color).to_string();
     Clipboard::new().and_then(|mut c|c.set_text(&copied_value)).map_err(|e|format!("复制失败：{e}"))?;
-    {let mut s=state.settings.lock().map_err(|_|"设置被占用")?;s.history.insert(0,record.clone());s.history.truncate(24);} save(&state)?;close_pickers(&app);emit_state(&app,&state)?;show_copied_toast(&app,copy_format);app.emit("picker-result",PickerResult{color:record,copied_format:copy_format,copied_value}).map_err(|e|e.to_string())
+    {let mut s=state.settings.lock().map_err(|_|"设置被占用")?;s.history.insert(0,record.clone());s.history.truncate(24);}
+    save(&state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        close_pickers(&app);
+        let _ = emit_state(&app, &app.state::<AppState>());
+        show_copied_toast(&app, copy_format);
+        let _ = app.emit("picker-result",PickerResult{color:record,copied_format:copy_format,copied_value});
+    });
+    Ok(())
 }
 
 #[tauri::command]
-fn cancel_picker(app:AppHandle)->Result<(),String>{close_pickers(&app);app.emit("picker-cancelled",()).map_err(|e|e.to_string())}
+fn cancel_picker(app:AppHandle)->Result<(),String>{
+    tauri::async_runtime::spawn_blocking(move || {
+        close_pickers(&app);
+        let _ = app.emit("picker-cancelled",());
+    });
+    Ok(())
+}
 
 #[tauri::command]
 fn clear_history(app:AppHandle,state:State<AppState>)->Result<(),String>{state.settings.lock().map_err(|_|"设置被占用")?.history.clear();save(&state)?;emit_state(&app,&state)}
@@ -343,11 +374,11 @@ pub fn run(){
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app,_shortcut,event|{if event.state()==ShortcutState::Pressed{let request=next_picker_request(app);let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request);});}}).build())
         .setup(|app|{
             let data_path=app.path().app_data_dir()?.join("settings.json"); let settings: Settings=fs::read(&data_path).ok().and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or_default();
-            let shortcut=settings.shortcut.clone(); app.manage(AppState{settings:Mutex::new(settings),captures:Mutex::new(HashMap::new()),picker_lifecycle:Mutex::new(()),picker_generation:AtomicU64::new(0),picking:AtomicBool::new(false),data_path});
+            let shortcut=settings.shortcut.clone(); app.manage(AppState{settings:Mutex::new(settings),captures:Mutex::new(HashMap::new()),picker_generation:AtomicU64::new(0),toast_generation:AtomicU64::new(0),picking:AtomicBool::new(false),data_path});
             app.global_shortcut().register(shortcut.as_str())?;
             let show=MenuItem::with_id(app,"show","打开取色鸭",true,None::<&str>)?;let pick=MenuItem::with_id(app,"pick","开始取色",true,None::<&str>)?;let quit=MenuItem::with_id(app,"quit","退出",true,None::<&str>)?;let menu=Menu::with_items(app,&[&show,&pick,&quit])?;
             let tray=TrayIconBuilder::new().icon(app.default_window_icon().unwrap().clone()).tooltip("取色鸭 · Duck Color Picker").menu(&menu).on_menu_event(|app,event|match event.id.as_ref(){"show"=>{let _=show_main(app);},"pick"=>{let request=next_picker_request(app);let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request);});},"quit"=>app.exit(0),_=>{}});
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
             let tray=tray.show_menu_on_left_click(false).on_tray_icon_event(|tray,event|if let TrayIconEvent::Click{button:MouseButton::Left,button_state:MouseButtonState::Up,..}=event{let _=show_main(tray.app_handle());});
             tray.build(app)?;
             if !std::env::args().any(|v|v=="--hidden"){show_main(app.handle()).map_err(std::io::Error::other)?;} else {hide_main(app.handle()).map_err(std::io::Error::other)?;}
