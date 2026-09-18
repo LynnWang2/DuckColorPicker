@@ -13,6 +13,8 @@ use tauri::{
     AppHandle, Emitter, Manager, State, WebviewUrl,
     WebviewWindowBuilder,
 };
+#[cfg(target_os = "windows")]
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use uuid::Uuid;
@@ -320,7 +322,10 @@ pub fn run(){
             let shortcut=settings.shortcut.clone(); app.manage(AppState{settings:Mutex::new(settings),captures:Mutex::new(HashMap::new()),picking:AtomicBool::new(false),data_path});
             app.global_shortcut().register(shortcut.as_str())?;
             let show=MenuItem::with_id(app,"show","打开取色鸭",true,None::<&str>)?;let pick=MenuItem::with_id(app,"pick","开始取色",true,None::<&str>)?;let quit=MenuItem::with_id(app,"quit","退出",true,None::<&str>)?;let menu=Menu::with_items(app,&[&show,&pick,&quit])?;
-            TrayIconBuilder::new().icon(app.default_window_icon().unwrap().clone()).tooltip("取色鸭 · Duck Color Picker").menu(&menu).on_menu_event(|app,event|match event.id.as_ref(){"show"=>{let _=show_main(app);},"pick"=>{let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app);});},"quit"=>app.exit(0),_=>{}}).build(app)?;
+            let tray=TrayIconBuilder::new().icon(app.default_window_icon().unwrap().clone()).tooltip("取色鸭 · Duck Color Picker").menu(&menu).on_menu_event(|app,event|match event.id.as_ref(){"show"=>{let _=show_main(app);},"pick"=>{let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app);});},"quit"=>app.exit(0),_=>{}});
+            #[cfg(target_os = "windows")]
+            let tray=tray.show_menu_on_left_click(false).on_tray_icon_event(|tray,event|if let TrayIconEvent::Click{button:MouseButton::Left,button_state:MouseButtonState::Up,..}=event{let _=show_main(tray.app_handle());});
+            tray.build(app)?;
             if !std::env::args().any(|v|v=="--hidden"){show_main(app.handle()).map_err(std::io::Error::other)?;} else {hide_main(app.handle()).map_err(std::io::Error::other)?;}
             Ok(())
         })
