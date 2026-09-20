@@ -1,38 +1,13 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>取色鸭</title><link rel="stylesheet" href="/src/styles.css">
-</head>
-<body>
-  <main class="app">
-    <header>
-      <div class="brand"><img src="/icon.png" alt=""><div><h1>取色鸭</h1><p>Duck Color Picker · 跨平台中文取色器</p></div></div>
-      <span class="status"><i></i>快捷键已启用</span>
-    </header>
-    <section class="hero">
-      <button id="pick" class="pick"><span class="pointer">↖</span><span><b>开始取色</b><small id="shortcutLabel">Ctrl + Shift + C</small></span></button>
-      <p id="hint">启动后移动鼠标并单击取色，按 Esc 取消</p>
-    </section>
-    <section class="latest hidden" id="latest">
-      <div class="latestTop"><div class="swatch" id="latestSwatch"></div><div class="latestName"><b id="latestName"></b><span id="latestCopyHint">已自动复制 HEX（不含 #）</span></div></div>
-      <div id="latestValues" class="valueList"></div>
-    </section>
-    <section class="panel settingsPanel">
-      <div class="settingRow"><div><h2>快捷键</h2><p>点击后按下新的组合键</p></div><input id="shortcut" readonly aria-label="取色快捷键"></div>
-      <div class="settingRow"><div><h2>外观</h2><p>可自动跟随系统深浅色</p></div><select id="theme"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></div>
-      <div class="settingRow"><div><h2>取色后自动复制</h2><p>可选择默认复制的色值格式</p></div><select id="copyFormat"><option value="hex">HEX（不含 #）</option><option value="rgb">RGB</option><option value="hsl">HSL</option><option value="cmyk">CMYK</option></select></div>
-      <label class="settingRow switchRow"><div><h2>随系统启动</h2><p>开机后在托盘中运行</p></div><input id="autoStart" type="checkbox"><span class="switch"></span></label>
-      <div class="formatSetting"><div><h2>显示色值</h2><p>可只显示你常用的格式</p></div><div class="formatChecks">
-        <label><input type="checkbox" data-format="hex"><span>HEX</span></label>
-        <label><input type="checkbox" data-format="rgb"><span>RGB</span></label>
-        <label><input type="checkbox" data-format="hsl"><span>HSL</span></label>
-        <label><input type="checkbox" data-format="cmyk"><span>CMYK</span></label>
-      </div></div>
-    </section>
-    <section class="historyHead"><div><h2>最近取色</h2><span id="count">0 个</span></div><button id="clear" class="textButton">清空</button></section>
-    <section id="history" class="history"><div class="empty"><span>◌</span><b>还没有取过颜色</b><p>第一次取色会显示在这里</p></div></section>
-  </main>
-  <div id="toast" class="toast"></div><script type="module" src="/src/main.js"></script>
-</body>
-</html>
+<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>取色鸭</title><link rel="stylesheet" href="/src/styles.css"></head>
+<body><main class="app">
+<header class="titlebar" data-tauri-drag-region><div class="window-controls"><button class="window-dot close" data-window="close" aria-label="关闭"></button><button class="window-dot minimize" data-window="minimize" aria-label="最小化"></button><button class="window-dot zoom" data-window="zoom" aria-label="最大化"></button></div><button id="about" class="about" aria-label="关于取色鸭">?</button></header>
+<section class="brand"><img src="/icon.png" alt="取色鸭"><h1>取色鸭</h1><p>Duck Color Picker</p></section>
+<button id="pick" class="pick"><span class="cursor-icon">↖</span><span>开始取色</span><kbd id="shortcutLabel">⌘ ⇧ C</kbd></button><p class="pick-hint" id="hint">快捷键可随时取色，Esc 取消</p>
+<section class="format-segments" aria-label="显示色值"><label><input type="checkbox" data-format="hex"><span>HEX</span></label><label><input type="checkbox" data-format="rgb"><span>RGB</span></label><label><input type="checkbox" data-format="hsl"><span>HSL</span></label><label><input type="checkbox" data-format="cmyk"><span>CMYK</span></label></section>
+<section class="card recent-card"><div class="section-heading"><h2>最近颜色</h2><button id="clear" class="quiet-button">清空</button></div><div id="history" class="history"></div></section>
+<section class="card settings-card"><h2>设置</h2>
+<div class="setting-row"><img src="/src/assets/setting_shortcut.svg" alt=""><label for="shortcut">快捷键</label><input id="shortcut" readonly aria-label="取色快捷键"></div>
+<div class="setting-row"><img src="/src/assets/setting_appearance.svg" alt=""><label for="theme">外观</label><select id="theme"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></div>
+<div class="setting-row"><img src="/src/assets/setting_copy.svg" alt=""><label for="copyFormat">自动复制</label><select id="copyFormat"><option value="hex">HEX</option><option value="rgb">RGB</option><option value="hsl">HSL</option><option value="cmyk">CMYK</option></select></div>
+<label class="setting-row startup-row"><img src="/src/assets/setting_power.svg" alt=""><span>随系统启动</span><input id="autoStart" type="checkbox"><i class="switch"></i></label></section>
+</main><dialog id="aboutDialog"><button class="dialog-close" aria-label="关闭">×</button><img src="/icon.png" alt=""><h2>取色鸭</h2><p>简单、快速的跨平台取色工具</p><small>Version 2.0.6</small></dialog><div id="toast" class="toast"></div><script type="module" src="/src/main.js"></script></body></html>

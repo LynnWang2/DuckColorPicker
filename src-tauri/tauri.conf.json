@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "取色鸭",
-  "version": "2.0.5",
-  "identifier": "com.duckcolorpicker.app",
+  "version": "2.0.6",
+  "identifier": "com.lynnwang.duckcolorpicker",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "node_modules/.bin/vite --port 1420",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "node_modules/.bin/vite build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -15,13 +15,16 @@
       {
         "label": "main",
         "title": "取色鸭",
-        "width": 720,
-        "height": 820,
-        "minWidth": 620,
-        "minHeight": 620,
+        "width": 420,
+        "height": 728,
+        "minWidth": 420,
+        "minHeight": 680,
         "center": true,
         "visible": false,
-        "resizable": true
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": true
       }
     ],
     "security": {
@@ -46,7 +49,7 @@
     "macOS": {
       "minimumSystemVersion": "11.0",
       "entitlements": "Entitlements.plist",
-      "signingIdentity": null
+      "infoPlist": "Info.plist"
     },
     "windows": {
       "digestAlgorithm": "sha256",
