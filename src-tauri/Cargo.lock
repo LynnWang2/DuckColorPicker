@@ -3378,9 +3378,10 @@ dependencies = [
 
 [[package]]
 name = "quseya"
-version = "2.0.5"
+version = "2.0.6"
 dependencies = [
  "arboard",
+ "image",
  "serde",
  "serde_json",
  "tauri",

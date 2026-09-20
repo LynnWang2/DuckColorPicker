@@ -77,6 +77,7 @@ struct AppState {
     picker_generation: AtomicU64,
     toast_generation: AtomicU64,
     picking: AtomicBool,
+    screen_permission_requested: AtomicBool,
     data_path: PathBuf,
 }
 
@@ -192,22 +193,22 @@ fn close_pickers(app: &AppHandle) {
     for label in labels { if let Some(window) = app.get_webview_window(&label) { let _ = window.close(); } }
     if let Ok(mut frames) = state.captures.lock() { frames.clear(); }
     state.picking.store(false, Ordering::SeqCst);
-    #[cfg(target_os = "macos")]
-    if app.get_webview_window("main").is_some_and(|window| !window.is_visible().unwrap_or(false)) {
-        let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-    }
 }
 
 #[cfg(target_os = "macos")]
-fn ensure_screen_capture_permission() -> Result<(), String> {
+fn ensure_screen_capture_permission(app: &AppHandle) -> Result<(), String> {
     #[link(name = "CoreGraphics", kind = "framework")]
     unsafe extern "C" {
         fn CGPreflightScreenCaptureAccess() -> bool;
+        fn CGRequestScreenCaptureAccess() -> bool;
     }
     if unsafe { CGPreflightScreenCaptureAccess() } { return Ok(()); }
-    // Do not call CGRequestScreenCaptureAccess while picking: on an unsigned
-    // build with a stale TCC grant, macOS may show its dialog on every attempt.
-    Err("当前安装的取色鸭尚未获得有效录屏权限。请在系统设置 → 隐私与安全性 → 屏幕与系统音频录制中重新添加并允许当前版本，然后完全退出并重新打开应用".into())
+    let state = app.state::<AppState>();
+    if !state.screen_permission_requested.swap(true, Ordering::SeqCst)
+        && unsafe { CGRequestScreenCaptureAccess() } {
+        return Ok(());
+    }
+    Err("macOS 尚未向当前安装的取色鸭授予录屏权限。请确认安装的是正式签名版本，并在系统设置 → 隐私与安全性 → 屏幕与系统音频录制中允许后重新打开应用。临时签名的测试包更新后可能需要重新授权。".into())
 }
 
 fn show_copied_toast(app: &AppHandle, format: CopyFormat) {
@@ -258,18 +259,24 @@ fn next_picker_request(app: &AppHandle) -> u64 {
     state.picker_generation.fetch_add(1, Ordering::SeqCst) + 1
 }
 
-fn open_picker(app: &AppHandle, request: u64) -> Result<(), String> {
+#[derive(Clone, Copy)]
+enum PickerSource { Shortcut, MainButton, Tray }
+
+fn open_picker(app: &AppHandle, request: u64, source: PickerSource) -> Result<(), String> {
     let state = app.state::<AppState>();
     if request != state.picker_generation.load(Ordering::SeqCst) { return Ok(()); }
     if state.picking.swap(true, Ordering::SeqCst) { return Ok(()); }
     if let Ok(mut frames) = state.captures.lock() { frames.clear(); }
     let result=(|| {
         #[cfg(target_os = "macos")]
-        ensure_screen_capture_permission()?;
-        let main_was_visible = app.get_webview_window("main").is_some_and(|window| window.is_visible().unwrap_or(false));
-        hide_main(app)?;
-        // Give the compositor time to remove the main window before taking the snapshot.
-        if main_was_visible { std::thread::sleep(Duration::from_millis(180)); }
+        ensure_screen_capture_permission(app)?;
+        if matches!(source, PickerSource::MainButton) {
+            if let Some(window) = app.get_webview_window("main") {
+                window.minimize().map_err(|e| e.to_string())?;
+                // Let the minimization animation finish before capturing the desktop.
+                std::thread::sleep(Duration::from_millis(180));
+            }
+        }
         let monitors=Monitor::all().map_err(|e| format!("无法读取屏幕：{e}"))?;
         if monitors.is_empty(){return Err("没有检测到显示器".into());}
         for (index,monitor) in monitors.into_iter().enumerate(){
@@ -320,14 +327,19 @@ fn open_picker(app: &AppHandle, request: u64) -> Result<(), String> {
         }
         Ok(())
     })();
-    if result.is_err(){ close_pickers(app); let _ = show_main(app); }
+    if result.is_err(){
+        close_pickers(app);
+        if matches!(source, PickerSource::MainButton) {
+            if let Some(window) = app.get_webview_window("main") { let _ = window.unminimize(); }
+        }
+    }
     result
 }
 
 #[tauri::command]
 async fn start_picker(app: AppHandle) -> Result<(), String> {
     let request=next_picker_request(&app);
-    tauri::async_runtime::spawn_blocking(move || open_picker(&app,request)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || open_picker(&app,request,PickerSource::MainButton)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -396,13 +408,20 @@ pub fn run(){
         // Configure autostart here: this plugin accepts no JSON object configuration.
         // Adding plugins.autostart to tauri.conf.json aborts startup on both platforms.
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
-        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app,_shortcut,event|{if event.state()==ShortcutState::Pressed{let request=next_picker_request(app);let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request);});}}).build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app,_shortcut,event|{if event.state()==ShortcutState::Pressed{let request=next_picker_request(app);let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request,PickerSource::Shortcut);});}}).build())
         .setup(|app|{
             let data_path=app.path().app_data_dir()?.join("settings.json"); let settings: Settings=fs::read(&data_path).ok().and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or_default();
-            let shortcut=settings.shortcut.clone(); app.manage(AppState{settings:Mutex::new(settings),captures:Mutex::new(HashMap::new()),picker_generation:AtomicU64::new(0),toast_generation:AtomicU64::new(0),picking:AtomicBool::new(false),data_path});
+            let shortcut=settings.shortcut.clone(); app.manage(AppState{settings:Mutex::new(settings),captures:Mutex::new(HashMap::new()),picker_generation:AtomicU64::new(0),toast_generation:AtomicU64::new(0),picking:AtomicBool::new(false),screen_permission_requested:AtomicBool::new(false),data_path});
             app.global_shortcut().register(shortcut.as_str())?;
             let show=MenuItem::with_id(app,"show","打开取色鸭",true,None::<&str>)?;let pick=MenuItem::with_id(app,"pick","开始取色",true,None::<&str>)?;let quit=MenuItem::with_id(app,"quit","退出",true,None::<&str>)?;let menu=Menu::with_items(app,&[&show,&pick,&quit])?;
-            let tray=TrayIconBuilder::new().icon(app.default_window_icon().unwrap().clone()).tooltip("取色鸭 · Duck Color Picker").menu(&menu).on_menu_event(|app,event|match event.id.as_ref(){"show"=>{let _=show_main(app);},"pick"=>{let request=next_picker_request(app);let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request);});},"quit"=>app.exit(0),_=>{}});
+            let tray_icon = image::load_from_memory(include_bytes!("../../src/assets/tray.png"))
+                .map(|image| {
+                    let rgba = image.into_rgba8();
+                    let (width, height) = rgba.dimensions();
+                    tauri::image::Image::new_owned(rgba.into_raw(), width, height)
+                })
+                .unwrap_or_else(|_| app.default_window_icon().unwrap().clone());
+            let tray=TrayIconBuilder::new().icon(tray_icon).icon_as_template(cfg!(target_os="macos")).tooltip("取色鸭 · Duck Color Picker").menu(&menu).on_menu_event(|app,event|match event.id.as_ref(){"show"=>{let _=show_main(app);},"pick"=>{let request=next_picker_request(app);let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request,PickerSource::Tray);});},"quit"=>app.exit(0),_=>{}});
             #[cfg(any(target_os = "windows", target_os = "macos"))]
             let tray=tray.show_menu_on_left_click(false).on_tray_icon_event(|tray,event|if let TrayIconEvent::Click{button:MouseButton::Left,button_state:MouseButtonState::Up,..}=event{let _=show_main(tray.app_handle());});
             tray.build(app)?;

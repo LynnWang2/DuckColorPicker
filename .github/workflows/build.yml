@@ -3,7 +3,6 @@ name: build-desktop
 on:
   workflow_dispatch:
   push:
-    branches: ["main"]
     tags: ["v*"]
 
 jobs:
@@ -33,10 +32,20 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
-          releaseBody: "Windows 与 macOS 安装包"
+          releaseBody: |
+            全新 Figma 界面与应用图标；优化快捷键、主界面按钮和菜单栏/托盘取色流程。
+
+            macOS：Apple Silicon 与 Intel 通用版 DMG / App。
+            Windows：NSIS 安装包。
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
