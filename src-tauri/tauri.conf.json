@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "取色鸭",
+  "productName": "DuckColorPicker",
   "version": "2.0.8",
   "identifier": "com.lynnwang.duckcolorpicker",
   "build": {
@@ -10,7 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "productName": "取色鸭",
+    "productName": "DuckColorPicker",
     "macOSPrivateApi": true,
     "windows": [
       {
