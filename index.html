@@ -1,6 +1,6 @@
 <!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>取色鸭</title><link rel="stylesheet" href="/src/styles.css"></head>
 <body><main class="app">
-<header class="titlebar" data-tauri-drag-region><div class="window-controls"><button class="window-dot close" data-window="close" aria-label="关闭"></button><button class="window-dot minimize" data-window="minimize" aria-label="最小化"></button><button class="window-dot zoom" data-window="zoom" aria-label="最大化"></button></div><button id="about" class="about" aria-label="关于取色鸭">?</button></header>
+<header class="titlebar" data-tauri-drag-region><button id="about" class="about" aria-label="关于取色鸭">?</button></header>
 <section class="brand"><img src="/icon.png" alt="取色鸭"><h1>取色鸭</h1><p>Duck Color Picker</p></section>
 <button id="pick" class="pick"><span class="cursor-icon">↖</span><span>开始取色</span><kbd id="shortcutLabel">⌘ ⇧ C</kbd></button><p class="pick-hint" id="hint">快捷键可随时取色，Esc 取消</p>
 <section class="format-segments" aria-label="显示色值"><label><input type="checkbox" data-format="hex"><span>HEX</span></label><label><input type="checkbox" data-format="rgb"><span>RGB</span></label><label><input type="checkbox" data-format="hsl"><span>HSL</span></label><label><input type="checkbox" data-format="cmyk"><span>CMYK</span></label></section>
