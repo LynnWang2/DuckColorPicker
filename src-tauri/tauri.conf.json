@@ -10,7 +10,6 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "productName": "DuckColorPicker",
     "macOSPrivateApi": true,
     "windows": [
       {
