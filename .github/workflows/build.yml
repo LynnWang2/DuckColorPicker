@@ -38,7 +38,9 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            修复 Windows 与 macOS 的 GitHub Actions 打包流程，并升级 Actions 运行时。
+            - 主窗口改用系统原生窗口按钮（Windows 原生标题栏，macOS 悬浮红绿灯按钮）
+            - 修复浅色/深色模式背景透明问题，改为实色不透明渐变
+            - Windows 去掉内容区圆角，macOS 保留圆角悬浮效果
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
@@ -72,7 +74,9 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            修复 Windows 与 macOS 的 GitHub Actions 打包流程，并升级 Actions 运行时。
+            - 主窗口改用系统原生窗口按钮（Windows 原生标题栏，macOS 悬浮红绿灯按钮）
+            - 修复浅色/深色模式背景透明问题，改为实色不透明渐变
+            - Windows 去掉内容区圆角，macOS 保留圆角悬浮效果
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
@@ -89,7 +93,9 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            修复 Windows 与 macOS 的 GitHub Actions 打包流程，并升级 Actions 运行时。
+            - 主窗口改用系统原生窗口按钮（Windows 原生标题栏，macOS 悬浮红绿灯按钮）
+            - 修复浅色/深色模式背景透明问题，改为实色不透明渐变
+            - Windows 去掉内容区圆角，macOS 保留圆角悬浮效果
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
