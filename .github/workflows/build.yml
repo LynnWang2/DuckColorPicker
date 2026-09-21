@@ -19,8 +19,8 @@ jobs:
             args: "--target universal-apple-darwin --bundles app,dmg"
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -29,7 +29,37 @@ jobs:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - run: npm ci
       - run: npm test
-      - uses: tauri-apps/tauri-action@v0
+      - name: Build and publish Windows bundle
+        if: runner.os == 'Windows'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: "取色鸭 v__VERSION__"
+          releaseBody: |
+            修复 Windows 与 macOS 的 GitHub Actions 打包流程，并升级 Actions 运行时。
+
+            macOS：Apple Silicon 与 Intel 通用版 DMG / App。
+            Windows：NSIS 安装包。
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Detect Apple signing configuration
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ]; then
+            echo "configured=true" >> "$GITHUB_ENV"
+          else
+            echo "configured=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build and publish signed macOS bundle
+        if: runner.os == 'macOS' && env.configured == 'true'
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -42,7 +72,24 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            全新 Figma 界面与应用图标；优化快捷键、主界面按钮和菜单栏/托盘取色流程。
+            修复 Windows 与 macOS 的 GitHub Actions 打包流程，并升级 Actions 运行时。
+
+            macOS：Apple Silicon 与 Intel 通用版 DMG / App。
+            Windows：NSIS 安装包。
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Build and publish unsigned macOS bundle
+        if: runner.os == 'macOS' && env.configured != 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: "取色鸭 v__VERSION__"
+          releaseBody: |
+            修复 Windows 与 macOS 的 GitHub Actions 打包流程，并升级 Actions 运行时。
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
