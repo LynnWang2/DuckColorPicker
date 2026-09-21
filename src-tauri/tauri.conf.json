@@ -10,6 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "productName": "取色鸭",
     "macOSPrivateApi": true,
     "windows": [
       {
