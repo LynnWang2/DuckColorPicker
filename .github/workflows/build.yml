@@ -38,9 +38,9 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            修复 Windows 主界面取色后窗口被隐藏的问题，改为最小化到任务栏。
-            托盘启动取色时保留主窗口原有状态。
-            修复屏幕复制弹幕沿用旧 HEX 内容的问题，使其匹配本次选择的复制格式和值。
+            macOS 取色前检查屏幕录制权限，未授权时引导用户去系统设置授权并重启应用。
+            macOS 未签名构建改为 ad-hoc 签名，使屏幕录制授权能够生效。
+            修复一处 Rust 编译错误。
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
@@ -74,9 +74,9 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            修复 Windows 主界面取色后窗口被隐藏的问题，改为最小化到任务栏。
-            托盘启动取色时保留主窗口原有状态。
-            修复屏幕复制弹幕沿用旧 HEX 内容的问题，使其匹配本次选择的复制格式和值。
+            macOS 取色前检查屏幕录制权限，未授权时引导用户去系统设置授权并重启应用。
+            macOS 未签名构建改为 ad-hoc 签名，使屏幕录制授权能够生效。
+            修复一处 Rust 编译错误。
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
@@ -93,9 +93,9 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            修复 Windows 主界面取色后窗口被隐藏的问题，改为最小化到任务栏。
-            托盘启动取色时保留主窗口原有状态。
-            修复屏幕复制弹幕沿用旧 HEX 内容的问题，使其匹配本次选择的复制格式和值。
+            macOS 取色前检查屏幕录制权限，未授权时引导用户去系统设置授权并重启应用。
+            macOS 未签名构建改为 ad-hoc 签名，使屏幕录制授权能够生效。
+            修复一处 Rust 编译错误。
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
