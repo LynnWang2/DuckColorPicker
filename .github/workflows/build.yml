@@ -38,9 +38,8 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            macOS 取色前检查屏幕录制权限，未授权时引导用户去系统设置授权并重启应用。
-            macOS 未签名构建改为 ad-hoc 签名，使屏幕录制授权能够生效。
-            修复一处 Rust 编译错误。
+            macOS 菜单栏图标换成设计稿小鸭剪影，修复之前显示为白色实心框的问题；
+            图标为 template 模式，随浅色/深色菜单栏自动适配。
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
@@ -74,9 +73,8 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            macOS 取色前检查屏幕录制权限，未授权时引导用户去系统设置授权并重启应用。
-            macOS 未签名构建改为 ad-hoc 签名，使屏幕录制授权能够生效。
-            修复一处 Rust 编译错误。
+            macOS 菜单栏图标换成设计稿小鸭剪影，修复之前显示为白色实心框的问题；
+            图标为 template 模式，随浅色/深色菜单栏自动适配。
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
@@ -93,9 +91,8 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            macOS 取色前检查屏幕录制权限，未授权时引导用户去系统设置授权并重启应用。
-            macOS 未签名构建改为 ad-hoc 签名，使屏幕录制授权能够生效。
-            修复一处 Rust 编译错误。
+            macOS 菜单栏图标换成设计稿小鸭剪影，修复之前显示为白色实心框的问题；
+            图标为 template 模式，随浅色/深色菜单栏自动适配。
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
