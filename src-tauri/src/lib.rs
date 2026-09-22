@@ -459,7 +459,7 @@ fn open_picker(app: &AppHandle, request: u64, source: PickerSource) -> Result<()
             }
         }
         let monitors=Monitor::all().map_err(|e| format!("无法读取屏幕：{e}"))?;
-        if monitors.is_empty(){return Err("没有检测到显示器".into());}
+        if monitors.is_empty(){return Err("没有检测到显示器".to_string());}
         for (index,monitor) in monitors.into_iter().enumerate(){
             if request != state.picker_generation.load(Ordering::SeqCst) { return Ok(()); }
             let image=monitor.capture_image().map_err(|e| format!("无法截取屏幕，请授予屏幕录制权限：{e}"))?;
