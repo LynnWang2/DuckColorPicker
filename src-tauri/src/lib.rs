@@ -414,7 +414,13 @@ pub fn run(){
             let shortcut=settings.shortcut.clone(); app.manage(AppState{settings:Mutex::new(settings),captures:Mutex::new(HashMap::new()),picker_generation:AtomicU64::new(0),toast_generation:AtomicU64::new(0),picking:AtomicBool::new(false),screen_permission_requested:AtomicBool::new(false),data_path});
             app.global_shortcut().register(shortcut.as_str())?;
             let show=MenuItem::with_id(app,"show","打开取色鸭",true,None::<&str>)?;let pick=MenuItem::with_id(app,"pick","开始取色",true,None::<&str>)?;let quit=MenuItem::with_id(app,"quit","退出",true,None::<&str>)?;let menu=Menu::with_items(app,&[&show,&pick,&quit])?;
-            let tray_icon = image::load_from_memory(include_bytes!("../../src/assets/tray.png"))
+            // Windows needs the colored, transparent rounded icon: the old tray.png
+            // was an opaque white square and disappeared against the taskbar.
+            #[cfg(target_os = "windows")]
+            let tray_icon_bytes = include_bytes!("../icons/32x32.png").as_slice();
+            #[cfg(not(target_os = "windows"))]
+            let tray_icon_bytes = include_bytes!("../../src/assets/tray.png").as_slice();
+            let tray_icon = image::load_from_memory(tray_icon_bytes)
                 .map(|image| {
                     let rgba = image.into_rgba8();
                     let (width, height) = rgba.dimensions();
