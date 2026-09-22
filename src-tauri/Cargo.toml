@@ -1,6 +1,6 @@
 [package]
 name = "quseya"
-version = "2.0.10"
+version = "2.0.11"
 description = "取色鸭 · Duck Color Picker"
 authors = ["Duck Color Picker"]
 edition = "2021"
@@ -22,3 +22,4 @@ uuid = { version = "1", features = ["v4"] }
 arboard = "3"
 xcap = "0.8"
 image = { version = "0.25", default-features = false, features = ["png"] }
+base64 = "0.22"
