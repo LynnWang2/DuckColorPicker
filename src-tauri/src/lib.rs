@@ -79,7 +79,7 @@ struct AppState {
     picker_generation: AtomicU64,
     toast_generation: AtomicU64,
     picking: AtomicBool,
-    main_hide_on_picker_ready: AtomicBool,
+    main_minimize_on_picker_ready: AtomicBool,
     capture_setup_done: AtomicBool,
     screen_permission_requested: AtomicBool,
     data_path: PathBuf,
@@ -213,7 +213,7 @@ fn hide_main(app: &AppHandle) -> Result<(), String> {
 fn close_pickers(app: &AppHandle) {
     let state = app.state::<AppState>();
     state.picker_generation.fetch_add(1, Ordering::SeqCst);
-    state.main_hide_on_picker_ready.store(false, Ordering::SeqCst);
+    state.main_minimize_on_picker_ready.store(false, Ordering::SeqCst);
     state.capture_setup_done.store(false, Ordering::SeqCst);
     let labels: Vec<_> = app.webview_windows().keys().filter(|k| k.starts_with("picker-")).cloned().collect();
     for label in labels { if let Some(window) = app.get_webview_window(&label) { let _ = window.close(); } }
@@ -237,20 +237,26 @@ fn ensure_screen_capture_permission(app: &AppHandle) -> Result<(), String> {
     Err("macOS 尚未向当前安装的取色鸭授予录屏权限。请确认安装的是正式签名版本，并在系统设置 → 隐私与安全性 → 屏幕与系统音频录制中允许后重新打开应用。临时签名的测试包更新后可能需要重新授权。".into())
 }
 
+fn copied_toast_url(format: CopyFormat, value: &str) -> String {
+    let encoded_value: String=value.bytes().map(|byte|format!("%{byte:02X}")).collect();
+    format!("toast.html?format={}&value={encoded_value}", format.label())
+}
+
 fn show_copied_toast(app: &AppHandle, format: CopyFormat, value: &str, monitor_bounds: Option<(i32, i32, u32, u32)>) {
     let generation=app.state::<AppState>().toast_generation.fetch_add(1,Ordering::SeqCst)+1;
-    let window=if let Some(existing)=app.get_webview_window("copied-toast") {
-        let _=app.emit_to("copied-toast","copied-toast-update",serde_json::json!({"format":format.label(),"value":value}));
-        let _=existing.show();
-        Some(existing)
-    } else {
-        let encoded_value: String=value.bytes().map(|byte|format!("%{byte:02X}")).collect();
-        let url = format!("toast.html?format={}&value={encoded_value}", format.label());
-        WebviewWindowBuilder::new(app, "copied-toast", WebviewUrl::App(url.into()))
-            .title("已复制色值").decorations(false).transparent(true).shadow(false)
-            .always_on_top(true).skip_taskbar(true).focused(false)
-            .inner_size(390.0, 52.0).center().build().ok()
-    };
+    // A reused webview can show its previous HEX text before an update event is handled.
+    // Give each copy its own URL so the first rendered frame uses the copied format/value.
+    for (label, old_window) in app.webview_windows() {
+        if label.starts_with("copied-toast-") {
+            let _=old_window.hide();
+            let _=old_window.close();
+        }
+    }
+    let label=format!("copied-toast-{generation}");
+    let window=WebviewWindowBuilder::new(app, &label, WebviewUrl::App(copied_toast_url(format,value).into()))
+        .title("已复制色值").decorations(false).transparent(true).shadow(false)
+        .always_on_top(true).skip_taskbar(true).focused(false).visible(false)
+        .inner_size(390.0, 52.0).center().build().ok();
     if let Some(window)=window {
         let bounds=monitor_bounds.or_else(||window.current_monitor().ok().flatten().map(|monitor|{
             let p=monitor.position();let s=monitor.size();(p.x,p.y,s.width,s.height)
@@ -261,6 +267,7 @@ fn show_copied_toast(app: &AppHandle, format: CopyFormat, value: &str, monitor_b
             let top=y+(height as f64*0.68) as i32;
             let _=window.set_position(tauri::PhysicalPosition::new(left,top));
         }
+        let _=window.show();
         let app=app.clone();
         tauri::async_runtime::spawn_blocking(move || {
             std::thread::sleep(Duration::from_millis(1700));
@@ -297,6 +304,10 @@ fn next_picker_request(app: &AppHandle) -> u64 {
 
 #[derive(Clone, Copy)]
 enum PickerSource { Shortcut, MainButton, Tray }
+
+impl PickerSource {
+    fn changes_main_window(self) -> bool { matches!(self, Self::MainButton) }
+}
 
 fn encode_capture_image(rgba:&[u8],width:u32,height:u32)->Result<String,String>{
     let mut png=Vec::new();
@@ -361,17 +372,17 @@ fn open_picker(app: &AppHandle, request: u64, source: PickerSource) -> Result<()
     let result=(|| {
         #[cfg(target_os = "macos")]
         ensure_screen_capture_permission(app)?;
-        if matches!(source, PickerSource::MainButton) {
+        if source.changes_main_window() {
             if let Some(window) = app.get_webview_window("main") {
                 #[cfg(target_os = "windows")]
                 {
                     let _ = window_composition::disable_transitions(&window);
                     if window_composition::exclude_from_capture(&window, true).is_ok() {
                         main_capture_excluded = true;
-                        state.main_hide_on_picker_ready.store(true, Ordering::SeqCst);
+                        state.main_minimize_on_picker_ready.store(true, Ordering::SeqCst);
                         window_composition::wait_for_hidden_frame();
                     } else {
-                        window.hide().map_err(|e| e.to_string())?;
+                        window.minimize().map_err(|e| e.to_string())?;
                         window_composition::wait_for_hidden_frame();
                     }
                 }
@@ -444,7 +455,7 @@ fn open_picker(app: &AppHandle, request: u64, source: PickerSource) -> Result<()
     }
     if result.is_err(){
         close_pickers(app);
-        if matches!(source, PickerSource::MainButton) {
+        if source.changes_main_window() {
             let _=show_main(app);
         }
     }
@@ -498,9 +509,9 @@ fn show_ready_picker(state:State<AppState>,window:tauri::WebviewWindow)->Result<
     }
     if !state.capture_setup_done.load(Ordering::SeqCst) { return Ok(false); }
     window.show().map_err(|e|e.to_string())?;
-    if state.main_hide_on_picker_ready.swap(false, Ordering::SeqCst) {
+    if state.main_minimize_on_picker_ready.swap(false, Ordering::SeqCst) {
         if let Some(main) = window.app_handle().get_webview_window("main") {
-            main.hide().map_err(|e|e.to_string())?;
+            main.minimize().map_err(|e|e.to_string())?;
         }
     }
     // Focus only the display under the pointer; another display must not steal
@@ -597,7 +608,7 @@ pub fn run(){
         .setup(|app|{
             let data_path=app.path().app_data_dir()?.join("settings.json"); let mut settings: Settings=fs::read(&data_path).ok().and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or_default();
             for color in &mut settings.history { color.name=color_name(color.r,color.g,color.b).into(); }
-            let shortcut=settings.shortcut.clone(); app.manage(AppState{settings:Mutex::new(settings),captures:Mutex::new(HashMap::new()),picker_generation:AtomicU64::new(0),toast_generation:AtomicU64::new(0),picking:AtomicBool::new(false),main_hide_on_picker_ready:AtomicBool::new(false),capture_setup_done:AtomicBool::new(false),screen_permission_requested:AtomicBool::new(false),data_path});
+            let shortcut=settings.shortcut.clone(); app.manage(AppState{settings:Mutex::new(settings),captures:Mutex::new(HashMap::new()),picker_generation:AtomicU64::new(0),toast_generation:AtomicU64::new(0),picking:AtomicBool::new(false),main_minimize_on_picker_ready:AtomicBool::new(false),capture_setup_done:AtomicBool::new(false),screen_permission_requested:AtomicBool::new(false),data_path});
             app.global_shortcut().register(shortcut.as_str())?;
             let show=MenuItem::with_id(app,"show","打开取色鸭",true,None::<&str>)?;let pick=MenuItem::with_id(app,"pick","开始取色",true,None::<&str>)?;let quit=MenuItem::with_id(app,"quit","退出",true,None::<&str>)?;let menu=Menu::with_items(app,&[&show,&pick,&quit])?;
             // Windows needs the colored, transparent rounded icon: the old tray.png
@@ -630,6 +641,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_main_button_changes_the_main_window_for_picking() {
+        assert!(PickerSource::MainButton.changes_main_window());
+        assert!(!PickerSource::Tray.changes_main_window());
+        assert!(!PickerSource::Shortcut.changes_main_window());
+    }
+
+    #[test]
     fn old_settings_keep_hex_as_default_copy_format() {
         let old = r##"{"shortcut":"CommandOrControl+Shift+C","theme":"system","formats":{"hex":true,"rgb":true,"hsl":false,"cmyk":false},"autoStart":false,"history":[]}"##;
         let settings: Settings = serde_json::from_str(old).unwrap();
@@ -647,6 +665,18 @@ mod tests {
         assert_eq!(CopyFormat::HexWithHash.value(&color), "#FF0000");
         assert!(matches!(serde_json::from_str::<CopyFormat>("\"hexwithhash\"").unwrap(), CopyFormat::HexWithHash));
         assert!(serde_json::from_str::<CopyFormat>("\"unknown\"").is_err());
+    }
+
+    #[test]
+    fn copied_toast_url_uses_the_selected_format_and_copied_value() {
+        let color = sample(222, 222, 222);
+        for format in [CopyFormat::Hex, CopyFormat::HexWithHash, CopyFormat::Rgb, CopyFormat::Hsl, CopyFormat::Cmyk] {
+            let value = format.value(&color);
+            let url = copied_toast_url(format, value);
+            assert!(url.starts_with(&format!("toast.html?format={}&value=", format.label())));
+            let encoded_value: String = value.bytes().map(|byte| format!("%{byte:02X}")).collect();
+            assert!(url.ends_with(&encoded_value));
+        }
     }
 
     #[test]

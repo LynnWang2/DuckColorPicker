@@ -38,9 +38,9 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            优化取色启动切换，减少 Windows 全屏闪烁和主窗口残影。
-            修复取色显示与实际颜色不一致的问题，改进浅色中文颜色名。
-            优化最近取色、复制格式、设置界面和托盘交互。
+            修复 Windows 主界面取色后窗口被隐藏的问题，改为最小化到任务栏。
+            托盘启动取色时保留主窗口原有状态。
+            修复屏幕复制弹幕沿用旧 HEX 内容的问题，使其匹配本次选择的复制格式和值。
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
@@ -74,9 +74,9 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            优化取色启动切换，减少 Windows 全屏闪烁和主窗口残影。
-            修复取色显示与实际颜色不一致的问题，改进浅色中文颜色名。
-            优化最近取色、复制格式、设置界面和托盘交互。
+            修复 Windows 主界面取色后窗口被隐藏的问题，改为最小化到任务栏。
+            托盘启动取色时保留主窗口原有状态。
+            修复屏幕复制弹幕沿用旧 HEX 内容的问题，使其匹配本次选择的复制格式和值。
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
@@ -93,9 +93,9 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            优化取色启动切换，减少 Windows 全屏闪烁和主窗口残影。
-            修复取色显示与实际颜色不一致的问题，改进浅色中文颜色名。
-            优化最近取色、复制格式、设置界面和托盘交互。
+            修复 Windows 主界面取色后窗口被隐藏的问题，改为最小化到任务栏。
+            托盘启动取色时保留主窗口原有状态。
+            修复屏幕复制弹幕沿用旧 HEX 内容的问题，使其匹配本次选择的复制格式和值。
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。

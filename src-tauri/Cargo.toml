@@ -1,6 +1,6 @@
 [package]
 name = "quseya"
-version = "2.0.11"
+version = "2.0.12"
 description = "取色鸭 · Duck Color Picker"
 authors = ["Duck Color Picker"]
 edition = "2021"

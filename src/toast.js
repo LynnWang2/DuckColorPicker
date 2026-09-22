@@ -1,5 +1,3 @@
-import { listen } from '@tauri-apps/api/event';
-
 const message=document.querySelector('#message');
 function render({format,value}){
   const label=/^(HEX|RGB|HSL|CMYK)$/.test(format||'')?format:'色值';
@@ -12,4 +10,3 @@ function render({format,value}){
 }
 const query=new URLSearchParams(location.search);
 render({format:query.get('format'),value:query.get('value')});
-listen('copied-toast-update',event=>render(event.payload));
