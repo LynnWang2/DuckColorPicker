@@ -132,3 +132,15 @@ dialog small { color: var(--muted); }
 :root[data-theme="dark"] .project-link, :root[data-theme="dark"] .social-link { color: #ffcf6b; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme]) .project-link, :root:not([data-theme]) .social-link { color: #ffcf6b; } }
 .dialog-close { position: absolute; top: 8px; right: 10px; border: 0; background: transparent; color: var(--muted); font-size: 20px; }
+#permissionDialog { width: 340px; text-align: left; }
+#permissionDialog h2 { text-align: center; }
+#permissionDialog p { margin: 8px 0; line-height: 1.6; }
+.permission-key { padding: 10px 12px; border-radius: 10px; background: rgba(191,121,22,.12); color: var(--text); font-size: 12px; }
+.permission-key strong { color: #bf7916; }
+:root[data-theme="dark"] .permission-key strong { color: #ffcf6b; }
+.permission-steps { margin: 8px 0; padding-left: 20px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.permission-steps small { display: block; margin-top: 2px; }
+.dialog-actions { display: flex; gap: 10px; justify-content: center; margin-top: 14px; }
+.dialog-actions button { padding: 8px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); font-size: 13px; cursor: pointer; }
+.dialog-actions button.primary { border: 0; background: #bf7916; color: #fff; }
+.permission-note { display: block; margin-top: 12px; text-align: center; }

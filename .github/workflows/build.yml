@@ -102,3 +102,39 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+      - name: Ad-hoc sign macOS app and refresh release assets
+        if: runner.os == 'macOS' && env.configured != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BUNDLE_MACOS="src-tauri/target/universal-apple-darwin/release/bundle/macos"
+          APP="$BUNDLE_MACOS/DuckColorPicker.app"
+          DMG="$(ls src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg | head -1)"
+          APPTAR="$(ls "$BUNDLE_MACOS"/*.app.tar.gz | head -1)"
+
+          # Ad-hoc 签名：给二进制一个稳定的 cdhash 身份。
+          # 完全未签名的应用在 TCC 里没有可锚定的身份，
+          # 屏幕录制授权无法生效，CGPreflightScreenCaptureAccess() 会一直返回 false。
+          codesign --force --deep --sign - "$APP"
+          echo "---- codesign info ----"
+          codesign -dv "$APP" 2>&1 | head -8
+          codesign --verify --deep --strict "$APP" && echo "verify OK"
+
+          # 把签名后的 .app 换进 DMG（保留原有的 Applications 快捷方式与布局）
+          hdiutil convert "$DMG" -format UDRW -o /tmp/duck_rw.dmg
+          VOL="$(hdiutil attach -nobrowse /tmp/duck_rw.dmg | grep -o '/Volumes/.*' | head -1)"
+          rm -rf "$VOL/DuckColorPicker.app"
+          ditto "$APP" "$VOL/DuckColorPicker.app"
+          hdiutil detach "$VOL"
+          hdiutil convert /tmp/duck_rw.dmg -format UDZO -o "$DMG.new"
+          mv "$DMG.new" "$DMG"
+          rm -f /tmp/duck_rw.dmg
+
+          # 用签名后的 .app 重新打包 tar.gz
+          rm -f "$APPTAR"
+          tar -czf "$APPTAR" -C "$BUNDLE_MACOS" DuckColorPicker.app
+
+          # 用签名后的产物覆盖 release 附件
+          gh release upload "${GITHUB_REF_NAME}" "$DMG" "$APPTAR" --clobber

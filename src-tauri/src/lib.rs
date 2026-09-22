@@ -222,6 +222,9 @@ fn close_pickers(app: &AppHandle) {
 }
 
 #[cfg(target_os = "macos")]
+const SCREEN_PERMISSION_ERROR: &str = "macOS 尚未授予取色鸭屏幕录制权限。授权后必须完全退出并重新打开应用，权限才会生效。";
+
+#[cfg(target_os = "macos")]
 fn ensure_screen_capture_permission(app: &AppHandle) -> Result<(), String> {
     #[link(name = "CoreGraphics", kind = "framework")]
     unsafe extern "C" {
@@ -234,7 +237,69 @@ fn ensure_screen_capture_permission(app: &AppHandle) -> Result<(), String> {
         && unsafe { CGRequestScreenCaptureAccess() } {
         return Ok(());
     }
-    Err("macOS 尚未向当前安装的取色鸭授予录屏权限。请确认安装的是正式签名版本，并在系统设置 → 隐私与安全性 → 屏幕与系统音频录制中允许后重新打开应用。临时签名的测试包更新后可能需要重新授权。".into())
+    Err(SCREEN_PERMISSION_ERROR.into())
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PermissionStatus { granted: bool, translocated: bool }
+
+#[cfg(target_os = "macos")]
+fn screen_capture_granted() -> bool {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGPreflightScreenCaptureAccess() -> bool;
+    }
+    unsafe { CGPreflightScreenCaptureAccess() }
+}
+
+#[cfg(target_os = "macos")]
+fn app_translocated() -> bool {
+    std::env::current_exe().map(|p| p.to_string_lossy().contains("AppTranslocation")).unwrap_or(false)
+}
+
+#[tauri::command]
+fn screen_permission_status() -> Result<PermissionStatus, String> {
+    #[cfg(target_os = "macos")]
+    return Ok(PermissionStatus { granted: screen_capture_granted(), translocated: app_translocated() });
+    #[cfg(not(target_os = "macos"))]
+    return Ok(PermissionStatus { granted: true, translocated: false });
+}
+
+#[tauri::command]
+fn request_screen_permission(_app: AppHandle) -> Result<PermissionStatus, String> {
+    #[cfg(target_os = "macos")]
+    {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        unsafe extern "C" {
+            fn CGRequestScreenCaptureAccess() -> bool;
+        }
+        let state = _app.state::<AppState>();
+        // The system prompt fires at most once per process. It returns immediately
+        // and does not wait for the user's decision, so the caller must guide the
+        // user to System Settings and then relaunch the app.
+        if !state.screen_permission_requested.swap(true, Ordering::SeqCst) {
+            unsafe { CGRequestScreenCaptureAccess() };
+        }
+        return Ok(PermissionStatus { granted: screen_capture_granted(), translocated: app_translocated() });
+    }
+    #[cfg(not(target_os = "macos"))]
+    return Ok(PermissionStatus { granted: true, translocated: false });
+}
+
+#[tauri::command]
+fn open_screen_recording_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    return open_external_url("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture");
+    #[cfg(not(target_os = "macos"))]
+    return Err("屏幕录制权限设置仅 macOS 需要".into());
+}
+
+#[tauri::command]
+fn restart_app(app: AppHandle) -> Result<(), String> {
+    // Relaunch so a newly granted Screen Recording permission takes effect.
+    // macOS does not apply the grant to the already-running process.
+    tauri::process::restart(&app.env())
 }
 
 fn copied_toast_url(format: CopyFormat, value: &str) -> String {
@@ -455,6 +520,15 @@ fn open_picker(app: &AppHandle, request: u64, source: PickerSource) -> Result<()
     }
     if result.is_err(){
         close_pickers(app);
+        #[cfg(target_os = "macos")]
+        if let Err(ref message) = result {
+            // Tray/shortcut launches have no visible window: bring the main window
+            // back and let it show the permission guide dialog.
+            if message.as_str() == SCREEN_PERMISSION_ERROR && !source.changes_main_window() {
+                let _ = show_main(app);
+                let _ = app.emit("permission-missing", ());
+            }
+        }
         if source.changes_main_window() {
             let _=show_main(app);
         }
@@ -632,7 +706,7 @@ pub fn run(){
             Ok(())
         })
         .on_window_event(|window,event|if window.label()=="main"{if let tauri::WindowEvent::CloseRequested{api,..}=event{api.prevent_close();let _=hide_main(window.app_handle());}})
-        .invoke_handler(tauri::generate_handler![get_state,update_preferences,save_shortcut,start_picker,picker_pointer,get_capture_image,show_ready_picker,sample_color,confirm_color,cancel_picker,clear_history,delete_history,copy_value,open_project_url,open_xiaohongshu_url])
+        .invoke_handler(tauri::generate_handler![get_state,update_preferences,save_shortcut,start_picker,picker_pointer,get_capture_image,show_ready_picker,sample_color,confirm_color,cancel_picker,clear_history,delete_history,copy_value,open_project_url,open_xiaohongshu_url,screen_permission_status,request_screen_permission,open_screen_recording_settings,restart_app])
         .run(tauri::generate_context!()).expect("取色鸭启动失败");
 }
 

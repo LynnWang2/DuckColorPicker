@@ -68,6 +68,22 @@
     <a class="project-link" href="https://github.com/LynnWang2/DuckColorPicker" target="_blank" rel="noopener noreferrer">GitHub 项目主页</a>
     <a class="social-link" href="https://xhslink.cn/o/HidvZgySfF" target="_blank" rel="noopener noreferrer">小红书主页</a>
   </dialog>
+  <dialog id="permissionDialog">
+    <button class="dialog-close" data-close-permission aria-label="关闭">×</button>
+    <h2>需要"屏幕录制"权限</h2>
+    <p>取色需要读取屏幕画面，macOS 要求你手动授权一次。</p>
+    <p class="permission-key">关键：授权后必须<strong>完全退出再重新打开</strong>取色鸭，权限才会生效。只关闭窗口不算——窗口关闭后程序仍在托盘里运行。</p>
+    <ol class="permission-steps">
+      <li>点击「打开系统设置」，在「隐私与安全性 → 屏幕录制与系统音频」里打开「取色鸭」的开关。<small>（"系统音频"只是这个设置页面的名字，取色鸭不会录制任何音频。）</small></li>
+      <li id="permissionTranslocated" hidden>你似乎是直接从 DMG 里运行的：请先把取色鸭拖进「应用程序」文件夹再打开，否则授权可能无法生效。</li>
+      <li>回到这里，点击「重启取色鸭」。</li>
+    </ol>
+    <div class="dialog-actions">
+      <button id="openPermissionSettings" type="button">打开系统设置</button>
+      <button id="restartApp" class="primary" type="button">重启取色鸭</button>
+    </div>
+    <small class="permission-note">更新版本后可能需要重新授权；请使用 GitHub Release 的正式版本。</small>
+  </dialog>
   <div id="toast" class="toast"></div>
   <script type="module" src="/src/main.js"></script>
 </body>
