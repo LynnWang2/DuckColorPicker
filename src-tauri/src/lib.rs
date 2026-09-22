@@ -687,10 +687,14 @@ pub fn run(){
             let show=MenuItem::with_id(app,"show","打开取色鸭",true,None::<&str>)?;let pick=MenuItem::with_id(app,"pick","开始取色",true,None::<&str>)?;let quit=MenuItem::with_id(app,"quit","退出",true,None::<&str>)?;let menu=Menu::with_items(app,&[&show,&pick,&quit])?;
             // Windows needs the colored, transparent rounded icon: the old tray.png
             // was an opaque white square and disappeared against the taskbar.
+            // macOS uses the designed white duck silhouette (tray-mac.png) as a
+            // template image: the alpha channel is the mask, so it adapts to
+            // light/dark menu bars. It must keep real transparency — a fully
+            // opaque PNG renders as a solid white box in the menu bar.
             #[cfg(target_os = "windows")]
             let tray_icon_bytes = include_bytes!("../icons/32x32.png").as_slice();
             #[cfg(not(target_os = "windows"))]
-            let tray_icon_bytes = include_bytes!("../../src/assets/tray.png").as_slice();
+            let tray_icon_bytes = include_bytes!("../icons/tray-mac.png").as_slice();
             let tray_icon = image::load_from_memory(tray_icon_bytes)
                 .map(|image| {
                     let rgba = image.into_rgba8();
@@ -771,6 +775,26 @@ mod tests {
         assert_eq!(color_name(0xed,0xe7,0xf2),"浅灰紫色");
         assert_eq!(color_name(0xfd,0xf4,0xff),"浅灰紫色");
         assert_eq!(color_name(0xf1,0xf1,0xf1),"近白色");
+    }
+
+    #[test]
+    fn mac_tray_icon_keeps_transparency_for_template_mode() {
+        // The macOS menu bar icon is used as a template image: macOS takes the
+        // alpha channel as the mask. A fully opaque PNG shows up as a solid
+        // white box in the menu bar (this exact bug shipped once).
+        let bytes = include_bytes!("../icons/tray-mac.png");
+        let icon = image::load_from_memory(bytes).expect("tray-mac.png must decode").into_rgba8();
+        let (width, height) = icon.dimensions();
+        assert_eq!(width, height, "menu bar icon must be square");
+        assert!(width >= 36, "menu bar icon should be at least 36px for retina");
+        let mut transparent = false;
+        let mut opaque = false;
+        for pixel in icon.pixels() {
+            if pixel[3] == 0 { transparent = true; }
+            if pixel[3] == 255 { opaque = true; }
+        }
+        assert!(transparent, "tray-mac.png needs transparent pixels for the template mask");
+        assert!(opaque, "tray-mac.png needs opaque pixels for the duck shape");
     }
 
     #[test]
