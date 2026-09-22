@@ -128,8 +128,8 @@ jobs:
           rm -rf "$VOL/DuckColorPicker.app"
           ditto "$APP" "$VOL/DuckColorPicker.app"
           hdiutil detach "$VOL"
-          hdiutil convert /tmp/duck_rw.dmg -format UDZO -o "$DMG.new"
-          mv "$DMG.new" "$DMG"
+          hdiutil convert /tmp/duck_rw.dmg -format UDZO -o /tmp/duck_final.dmg
+          mv /tmp/duck_final.dmg "$DMG"
           rm -f /tmp/duck_rw.dmg
 
           # 用签名后的 .app 重新打包 tar.gz
