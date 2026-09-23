@@ -258,6 +258,15 @@ fn app_translocated() -> bool {
     std::env::current_exe().map(|p| p.to_string_lossy().contains("AppTranslocation")).unwrap_or(false)
 }
 
+/// macOS 右键弹完菜单后立即把菜单从托盘图标上摘掉。
+/// tray-icon 0.24 会把菜单永久挂到 NSStatusItem 上，导致左键点击被吞；
+/// 上游在 0.25.1 修成了"只在弹出瞬间挂载"，这里在应用层复刻。
+/// `set_menu(None)` 的泛型参数需要显式指定，用 helper 从 tray 自身推断 Runtime。
+#[cfg(target_os = "macos")]
+fn detach_tray_menu<R: tauri::Runtime>(tray: &tauri::tray::TrayIcon<R>) {
+    let _ = tray.set_menu(None::<tauri::menu::Menu<R>>);
+}
+
 #[tauri::command]
 fn screen_permission_status() -> Result<PermissionStatus, String> {
     #[cfg(target_os = "macos")]
@@ -776,7 +785,7 @@ pub fn run(){
             #[cfg(target_os="macos")]
             let tray=tray_builder.show_menu_on_left_click(false).on_tray_icon_event(move|tray,event|if let TrayIconEvent::Click{button,button_state,..}=event{match(button,button_state){
                 (MouseButton::Left,MouseButtonState::Up)=>{let app=tray.app_handle().clone();let request=next_picker_request(&app);tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request,PickerSource::Tray);});},
-                (MouseButton::Right,MouseButtonState::Down)=>{let _=tray.set_menu(Some(Box::new(menu.clone())));tray.show_menu();let _=tray.set_menu(None);},
+                (MouseButton::Right,MouseButtonState::Down)=>{let _=tray.set_menu(Some(menu.clone()));let _=tray.with_inner_tray_icon(|t|t.show_menu());detach_tray_menu(tray);},
                 _=>{},
             }});
             #[cfg(not(any(target_os="windows",target_os="macos")))]
