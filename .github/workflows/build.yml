@@ -38,7 +38,11 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            修复 macOS 授予屏幕录制权限后，点击取色直接闪退的问题。
+            macOS 取色体验优化：
+
+            - 从软件内点击「开始取色」时，主窗口最小化到 Dock（之前会直接隐藏）
+            - 权限说明页增加提示：更新版本后若取色失效，请先在系统设置里移除「取色鸭」再重新添加屏幕录制权限
+            - 关于页链接由 GitHub 项目主页改为取色鸭官网
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
@@ -72,7 +76,11 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            修复 macOS 授予屏幕录制权限后，点击取色直接闪退的问题。
+            macOS 取色体验优化：
+
+            - 从软件内点击「开始取色」时，主窗口最小化到 Dock（之前会直接隐藏）
+            - 权限说明页增加提示：更新版本后若取色失效，请先在系统设置里移除「取色鸭」再重新添加屏幕录制权限
+            - 关于页链接由 GitHub 项目主页改为取色鸭官网
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
@@ -89,7 +97,11 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            修复 macOS 授予屏幕录制权限后，点击取色直接闪退的问题。
+            macOS 取色体验优化：
+
+            - 从软件内点击「开始取色」时，主窗口最小化到 Dock（之前会直接隐藏）
+            - 权限说明页增加提示：更新版本后若取色失效，请先在系统设置里移除「取色鸭」再重新添加屏幕录制权限
+            - 关于页链接由 GitHub 项目主页改为取色鸭官网
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
