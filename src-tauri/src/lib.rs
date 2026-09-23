@@ -762,9 +762,25 @@ pub fn run(){
                     tauri::image::Image::new_owned(rgba.into_raw(), width, height)
                 })
                 .unwrap_or_else(|_| app.default_window_icon().unwrap().clone());
-            let tray=TrayIconBuilder::new().icon(tray_icon).icon_as_template(cfg!(target_os="macos")).tooltip("取色鸭 · Duck Color Picker").menu(&menu).on_menu_event(|app,event|match event.id.as_ref(){"show"=>{let _=show_main(app);},"pick"=>{let request=next_picker_request(app);let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request,PickerSource::Tray);});},"quit"=>app.exit(0),_=>{}});
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
-            let tray=tray.show_menu_on_left_click(false).on_tray_icon_event(|tray,event|if let TrayIconEvent::Click{button:MouseButton::Left,button_state:MouseButtonState::Up,..}=event{let app=tray.app_handle().clone();let request=next_picker_request(&app);tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request,PickerSource::Tray);});});
+            let tray_builder=TrayIconBuilder::new().icon(tray_icon).icon_as_template(cfg!(target_os="macos")).tooltip("取色鸭 · Duck Color Picker").on_menu_event(|app,event|match event.id.as_ref(){"show"=>{let _=show_main(app);},"pick"=>{let request=next_picker_request(app);let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request,PickerSource::Tray);});},"quit"=>app.exit(0),_=>{}});
+            // Windows 照旧在构建时挂载菜单。macOS 不行：tray-icon 0.24 会把菜单永久挂到
+            // NSStatusItem 上，macOS 27 的 AppKit 遇到已挂载菜单会直接弹菜单，
+            // 左键点击到不了 TrayIconEvent::Click（上游在 tray-icon 0.25.1 修了，
+            // 但 tauri 2.11.6 锁定 tray-icon ^0.24，只能在应用层复刻这个修法）。
+            #[cfg(not(target_os="macos"))]
+            let tray_builder=tray_builder.menu(&menu);
+            #[cfg(target_os="windows")]
+            let tray=tray_builder.show_menu_on_left_click(false).on_tray_icon_event(|tray,event|if let TrayIconEvent::Click{button:MouseButton::Left,button_state:MouseButtonState::Up,..}=event{let app=tray.app_handle().clone();let request=next_picker_request(&app);tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request,PickerSource::Tray);});});
+            // macOS：平时不挂载菜单，左键单击直达取色（对齐 Windows 托盘行为）；
+            // 右键按下时才临时挂载并弹出菜单，关闭后立即摘掉，避免吞掉左键点击。
+            #[cfg(target_os="macos")]
+            let tray=tray_builder.show_menu_on_left_click(false).on_tray_icon_event(move|tray,event|if let TrayIconEvent::Click{button,button_state,..}=event{match(button,button_state){
+                (MouseButton::Left,MouseButtonState::Up)=>{let app=tray.app_handle().clone();let request=next_picker_request(&app);tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request,PickerSource::Tray);});},
+                (MouseButton::Right,MouseButtonState::Down)=>{let _=tray.set_menu(Some(&menu));let _=tray.show_menu();let _=tray.set_menu(None);},
+                _=>{},
+            }});
+            #[cfg(not(any(target_os="windows",target_os="macos")))]
+            let tray=tray_builder;
             tray.build(app)?;
             if !std::env::args().any(|v|v=="--hidden"){show_main(app.handle()).map_err(std::io::Error::other)?;} else {hide_main(app.handle()).map_err(std::io::Error::other)?;}
             Ok(())
