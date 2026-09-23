@@ -490,11 +490,11 @@ mod mac_appkit {
         send_integer(window, "setLevel:", level, "取色窗口系统句柄为空")
     }
 
-    /// 关掉主窗口的显示/隐藏动画。
+    /// 关掉主窗口的显示/隐藏/最小化动画。
     ///
-    /// NSWindow 默认在显示/隐藏时有淡入淡出动画；从主窗口点"开始取色"时，
-    /// hide() 之后立刻截图会把淡出中的半透明窗口截进取色层，留下残影。
-    /// 设为 NSWindowAnimationBehaviorNone 后隐藏是瞬时的，
+    /// NSWindow 默认在显示/隐藏/最小化时有动画；从主窗口点"开始取色"时，
+    /// 最小化之后立刻截图会把动画中的窗口截进取色层，留下残影。
+    /// 设为 NSWindowAnimationBehaviorNone 后三者都是瞬时的，
     /// 截图前只需等窗口服务合成一帧即可（约 20ms）。
     /// 快捷键/菜单栏图标触发本来就不动主窗口，不需要这段延迟。
     /// 在 setup 里调用一次即可；必须在主线程调用。
@@ -547,11 +547,16 @@ fn open_picker(app: &AppHandle, request: u64, source: PickerSource) -> Result<()
             }
             #[cfg(not(target_os = "windows"))]
             {
-                // macOS: 主窗口隐藏时必须同步收起 Dock 图标（Accessory），
-                // 否则 Dock 图标还在，点按却唤不回主窗口。
-                hide_main(&app)?;
-                // 主窗口淡出动画已在启动时关掉，这里只等窗口服务合成一帧，
-                // 避免截到尚未完全隐藏的窗口。快捷键/菜单栏触发不走这里，无延迟。
+                // macOS: 从主窗口点"开始取色"时，最小化主窗口到 Dock，
+                // 而不是直接隐藏——隐藏会连 Dock 图标一起收起（Accessory），
+                // 看起来像窗口被关掉了。
+                // 最小化动画已在 setup 里随显示/隐藏动画一起关掉
+                // （setAnimationBehavior: NSWindowAnimationBehaviorNone），
+                // 最小化是瞬时的，这里只等窗口服务合成一帧再截图（约 20ms）。
+                // 快捷键/菜单栏触发不走这里，无延迟。
+                if let Some(window) = app.get_webview_window("main") {
+                    window.minimize().map_err(|e| e.to_string())?;
+                }
                 std::thread::sleep(Duration::from_millis(20));
             }
         }
@@ -773,7 +778,7 @@ fn open_external_url(url: &str) -> Result<(), String> {
 
 #[tauri::command]
 fn open_project_url() -> Result<(), String> {
-    open_external_url("https://github.com/LynnWang2/DuckColorPicker")
+    open_external_url("https://lynnwang2.github.io/DuckColorPicker/")
 }
 
 #[tauri::command]
