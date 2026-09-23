@@ -202,10 +202,8 @@ fn show_main(app: &AppHandle) -> Result<(), String> {
 }
 
 fn hide_main(app: &AppHandle) -> Result<(), String> {
+    // 主窗口的淡入淡出动画已在启动时关掉（见 setup），这里直接隐藏即可。
     if let Some(window) = app.get_webview_window("main") {
-        // macOS: 先关掉窗口的淡入淡出动画再隐藏，否则截图会抓到半透明残影。
-        #[cfg(target_os = "macos")]
-        let _ = mac_window_anim::disable_show_hide_animation(&window);
         window.hide().map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "macos")]
@@ -438,14 +436,18 @@ mod window_composition {
     }
 }
 
-/// macOS: 把取色窗口抬到 Dock 之上。
+/// macOS: 直接调 AppKit 的小工具。
 ///
-/// Tauri 的 `always_on_top` 在 macOS 只对应 NSFloatingWindowLevel，
-/// 仍然低于 Dock——取色层会被 Dock 图标盖住，鼠标靠近还会触发 Dock 放大。
-/// CGShieldingWindowLevel 是截图/取色类全屏覆盖层的标准层级，
-/// 盖住 Dock 与菜单栏后才能像 Windows 版一样全屏取色（含 Dock 区域）。
+/// 两条硬规则（之前都违反了，这就是授予屏幕录制权限后点取色直接闪退的原因）：
+/// 1. objc_msgSend 必须按被调方法的真实签名声明，绝不能写成 C 可变参数 `(...)`。
+///    ARM64 上可变参数的调用约定与普通函数完全不同，参数会传错；
+///    Apple 官方文档明确要求把 objc_msgSend cast 成被调方法的真实原型。
+/// 2. AppKit 的调用必须在主线程执行。
+///    - disable_show_hide_animation 在 setup（主线程）里调用一次即可，
+///      NSWindow 的 animationBehavior 是持久属性，设一次永久生效；
+///    - raise_above_dock 在取色流程（后台线程）里用 run_on_main_thread 派发。
 #[cfg(target_os = "macos")]
-mod mac_picker_level {
+mod mac_appkit {
     use std::ffi::{c_void, CString};
     use std::os::raw::c_char;
     use tauri::WebviewWindow;
@@ -453,7 +455,8 @@ mod mac_picker_level {
     #[link(name = "objc")]
     unsafe extern "C" {
         fn sel_registerName(name: *const c_char) -> *mut c_void;
-        fn objc_msgSend(receiver: *mut c_void, sel: *mut c_void, ...) -> *mut c_void;
+        // 下面两个方法都是 `- (void)xxx:(NSInteger)`，照此声明。
+        fn objc_msgSend(receiver: *mut c_void, sel: *mut c_void, arg: i64);
     }
 
     #[link(name = "CoreGraphics", kind = "framework")]
@@ -461,54 +464,43 @@ mod mac_picker_level {
         fn CGShieldingWindowLevel() -> i32;
     }
 
+    fn send_integer(window: &WebviewWindow, selector: &str, value: i64, null_msg: &str) -> Result<(), String> {
+        unsafe {
+            let ns_window = window.ns_window().map_err(|e| e.to_string())?;
+            if ns_window.is_null() {
+                return Err(null_msg.into());
+            }
+            let sel_name = CString::new(selector).map_err(|e| e.to_string())?;
+            let sel = sel_registerName(sel_name.as_ptr());
+            objc_msgSend(ns_window, sel, value);
+        }
+        Ok(())
+    }
+
+    /// 把取色窗口抬到 Dock 之上。
+    ///
+    /// Tauri 的 `always_on_top` 在 macOS 只对应 NSFloatingWindowLevel，
+    /// 仍然低于 Dock——取色层会被 Dock 图标盖住，鼠标靠近还会触发 Dock 放大。
+    /// CGShieldingWindowLevel 是截图/取色类全屏覆盖层的标准层级，
+    /// 盖住 Dock 与菜单栏后才能像 Windows 版一样全屏取色（含 Dock 区域）。
+    /// 必须在主线程调用（调用方用 run_on_main_thread 派发）。
     pub fn raise_above_dock(window: &WebviewWindow) -> Result<(), String> {
-        unsafe {
-            let ns_window = window.ns_window().map_err(|e| e.to_string())?;
-            if ns_window.is_null() {
-                return Err("取色窗口系统句柄为空".into());
-            }
-            // NSWindow.Level 是 NSInteger（64 位上为 i64）。
-            let level = CGShieldingWindowLevel() as i64;
-            let sel_name = CString::new("setLevel:").map_err(|e| e.to_string())?;
-            let sel = sel_registerName(sel_name.as_ptr());
-            objc_msgSend(ns_window, sel, level);
-        }
-        Ok(())
-    }
-}
-
-/// macOS: 关掉主窗口的显示/隐藏动画。
-///
-/// NSWindow 默认在显示/隐藏时有淡入淡出动画；从主窗口点"开始取色"时，
-/// hide() 之后立刻截图会把淡出中的半透明窗口截进取色层，留下残影。
-/// 设为 NSWindowAnimationBehaviorNone 后隐藏是瞬时的，
-/// 截图前只需等窗口服务合成一帧即可（约 20ms）。
-/// 快捷键/菜单栏图标触发本来就不动主窗口，不需要这段延迟。
-#[cfg(target_os = "macos")]
-mod mac_window_anim {
-    use std::ffi::{c_void, CString};
-    use std::os::raw::c_char;
-    use tauri::WebviewWindow;
-
-    #[link(name = "objc")]
-    unsafe extern "C" {
-        fn sel_registerName(name: *const c_char) -> *mut c_void;
-        fn objc_msgSend(receiver: *mut c_void, sel: *mut c_void, ...) -> *mut c_void;
+        // CGWindowLevel 是 int32_t；setLevel: 要的是 NSInteger（64 位上为 i64）。
+        let level = unsafe { CGShieldingWindowLevel() } as i64;
+        send_integer(window, "setLevel:", level, "取色窗口系统句柄为空")
     }
 
+    /// 关掉主窗口的显示/隐藏动画。
+    ///
+    /// NSWindow 默认在显示/隐藏时有淡入淡出动画；从主窗口点"开始取色"时，
+    /// hide() 之后立刻截图会把淡出中的半透明窗口截进取色层，留下残影。
+    /// 设为 NSWindowAnimationBehaviorNone 后隐藏是瞬时的，
+    /// 截图前只需等窗口服务合成一帧即可（约 20ms）。
+    /// 快捷键/菜单栏图标触发本来就不动主窗口，不需要这段延迟。
+    /// 在 setup 里调用一次即可；必须在主线程调用。
     pub fn disable_show_hide_animation(window: &WebviewWindow) -> Result<(), String> {
-        unsafe {
-            let ns_window = window.ns_window().map_err(|e| e.to_string())?;
-            if ns_window.is_null() {
-                return Err("主窗口系统句柄为空".into());
-            }
-            // NSWindowAnimationBehaviorNone = 1（NSInteger，64 位上为 i64）。
-            let behavior: i64 = 1;
-            let sel_name = CString::new("setAnimationBehavior:").map_err(|e| e.to_string())?;
-            let sel = sel_registerName(sel_name.as_ptr());
-            objc_msgSend(ns_window, sel, behavior);
-        }
-        Ok(())
+        // NSWindowAnimationBehaviorNone = 1（NSInteger，64 位上为 i64）。
+        send_integer(window, "setAnimationBehavior:", 1, "主窗口系统句柄为空")
     }
 }
 
@@ -558,7 +550,7 @@ fn open_picker(app: &AppHandle, request: u64, source: PickerSource) -> Result<()
                 // macOS: 主窗口隐藏时必须同步收起 Dock 图标（Accessory），
                 // 否则 Dock 图标还在，点按却唤不回主窗口。
                 hide_main(&app)?;
-                // 淡出动画已在 hide_main 里关掉，这里只等窗口服务合成一帧，
+                // 主窗口淡出动画已在启动时关掉，这里只等窗口服务合成一帧，
                 // 避免截到尚未完全隐藏的窗口。快捷键/菜单栏触发不走这里，无延迟。
                 std::thread::sleep(Duration::from_millis(20));
             }
@@ -593,8 +585,15 @@ fn open_picker(app: &AppHandle, request: u64, source: PickerSource) -> Result<()
                 .position(x,y).inner_size(view_width,view_height).accept_first_mouse(true).focused(false).visible(false).build().map_err(|e|e.to_string())?;
             // macOS: always_on_top 盖不住 Dock，抬到 CGShieldingWindowLevel
             // 才能对 Dock 区域取色，且鼠标过去不再触发 Dock 放大。
+            // AppKit 调用必须在主线程执行，这里是后台线程，用 run_on_main_thread 派发。
             #[cfg(target_os = "macos")]
-            mac_picker_level::raise_above_dock(&window)?;
+            {
+                let picker_window = window.clone();
+                app.run_on_main_thread(move || {
+                    let _ = mac_appkit::raise_above_dock(&picker_window);
+                })
+                .map_err(|e| e.to_string())?;
+            }
             if request != state.picker_generation.load(Ordering::SeqCst) {
                 let _ = window.close();
                 if let Ok(mut frames) = state.captures.lock() { frames.remove(&label); }
@@ -831,6 +830,13 @@ pub fn run(){
             #[cfg(not(any(target_os="windows",target_os="macos")))]
             let tray=tray_builder;
             tray.build(app)?;
+            // macOS: 启动时一次性关掉主窗口的显示/隐藏动画（NSWindow 的持久属性）。
+            // 之后 hide()/show() 都是瞬时的，从主窗口点"开始取色"截图不会抓到淡出残影。
+            // AppKit 调用必须在主线程执行，setup 本来就在主线程。
+            #[cfg(target_os = "macos")]
+            if let Some(main) = app.get_webview_window("main") {
+                let _ = mac_appkit::disable_show_hide_animation(&main);
+            }
             if !std::env::args().any(|v|v=="--hidden"){show_main(app.handle()).map_err(std::io::Error::other)?;} else {hide_main(app.handle()).map_err(std::io::Error::other)?;}
             Ok(())
         })
