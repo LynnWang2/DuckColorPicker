@@ -38,8 +38,9 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            macOS 菜单栏图标换成设计稿小鸭剪影，修复之前显示为白色实心框的问题；
-            图标为 template 模式，随浅色/深色菜单栏自动适配。
+            macOS：单击菜单栏图标直接取色（与 Windows 托盘一致），右键才弹出菜单；
+            从主窗口点"开始取色"不再有窗口淡出残影，截图更快；
+            取色层盖住 Dock，可对 Dock 区域取色，Dock 图标与主窗口同步显隐。
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
@@ -73,8 +74,9 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            macOS 菜单栏图标换成设计稿小鸭剪影，修复之前显示为白色实心框的问题；
-            图标为 template 模式，随浅色/深色菜单栏自动适配。
+            macOS：单击菜单栏图标直接取色（与 Windows 托盘一致），右键才弹出菜单；
+            从主窗口点"开始取色"不再有窗口淡出残影，截图更快；
+            取色层盖住 Dock，可对 Dock 区域取色，Dock 图标与主窗口同步显隐。
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
@@ -91,8 +93,9 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            macOS 菜单栏图标换成设计稿小鸭剪影，修复之前显示为白色实心框的问题；
-            图标为 template 模式，随浅色/深色菜单栏自动适配。
+            macOS：单击菜单栏图标直接取色（与 Windows 托盘一致），右键才弹出菜单；
+            从主窗口点"开始取色"不再有窗口淡出残影，截图更快；
+            取色层盖住 Dock，可对 Dock 区域取色，Dock 图标与主窗口同步显隐。
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
