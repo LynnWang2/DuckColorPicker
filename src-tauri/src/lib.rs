@@ -82,6 +82,10 @@ struct AppState {
     main_minimize_on_picker_ready: AtomicBool,
     capture_setup_done: AtomicBool,
     screen_permission_requested: AtomicBool,
+    /// macOS：快捷键/菜单栏图标触发取色时，若取色前我们的应用不在前台，
+    /// 取色完成后把整个应用隐藏，把焦点还给取色前的应用，
+    /// 避免取色层关闭后主窗口跳到最前面。
+    auto_hide_after_pick: AtomicBool,
     data_path: PathBuf,
 }
 
@@ -525,6 +529,22 @@ fn open_picker(app: &AppHandle, request: u64, source: PickerSource) -> Result<()
     if state.picking.swap(true, Ordering::SeqCst) { return Ok(()); }
     state.capture_setup_done.store(false, Ordering::SeqCst);
     if let Ok(mut frames) = state.captures.lock() { frames.clear(); }
+    #[cfg(target_os = "macos")]
+    {
+        // 快捷键/菜单栏图标触发的取色：记下取色前我们的应用是否在前台。
+        // 若不在前台，取色完成后把整个应用隐藏，把焦点还给取色前的应用，
+        // 避免取色层关闭后主窗口跳到最前面打断用户。
+        // 主窗口按钮触发的不需要（主窗口本来就是用户正在看的）。
+        // AppKit 调用必须在主线程，这里用 run_on_main_thread 派发。
+        let from_main_button = source.changes_main_window();
+        let app_clone = app.clone();
+        let app_was_active = app.run_on_main_thread(move || {
+            app_clone.get_webview_window("main")
+                .map(|w| w.is_focused().unwrap_or(false))
+                .unwrap_or(false)
+        }).unwrap_or(false);
+        state.auto_hide_after_pick.store(!from_main_button && !app_was_active, Ordering::SeqCst);
+    }
     #[cfg(target_os = "windows")]
     let mut main_capture_excluded = false;
     let result=(|| {
@@ -547,15 +567,16 @@ fn open_picker(app: &AppHandle, request: u64, source: PickerSource) -> Result<()
             }
             #[cfg(not(target_os = "windows"))]
             {
-                // macOS: 从主窗口点"开始取色"时，最小化主窗口到 Dock，
-                // 而不是直接隐藏——隐藏会连 Dock 图标一起收起（Accessory），
-                // 看起来像窗口被关掉了。
-                // 最小化动画已在 setup 里随显示/隐藏动画一起关掉
-                // （setAnimationBehavior: NSWindowAnimationBehaviorNone），
-                // 最小化是瞬时的，这里只等窗口服务合成一帧再截图（约 20ms）。
+                // macOS: 从主窗口点"开始取色"时，瞬间隐藏主窗口——
+                // animationBehavior 在 setup 里已设为 None，所以 hide() 没有动画；
+                // 又因为不碰 ActivationPolicy（保持 Regular），Dock 图标会留着，
+                // 效果等同于按住 Option 点按 Dock 图标（瞬间收起、无动画）。
+                // 之所以不用 minimize()：实测 animationBehavior 关不掉最小化的
+                // genie 缩小动画，截图会抓到动画中的窗口残影。
+                // 这里只等窗口服务合成一帧再截图（约 20ms）。
                 // 快捷键/菜单栏触发不走这里，无延迟。
                 if let Some(window) = app.get_webview_window("main") {
-                    window.minimize().map_err(|e| e.to_string())?;
+                    window.hide().map_err(|e| e.to_string())?;
                 }
                 std::thread::sleep(Duration::from_millis(20));
             }
@@ -740,9 +761,26 @@ fn confirm_color(app:AppHandle,state:State<AppState>,window:tauri::WebviewWindow
     });
     tauri::async_runtime::spawn_blocking(move || {
         close_pickers(&app);
+        #[cfg(target_os = "macos")]
+        let hide_app_after = {
+            let state = app.state::<AppState>();
+            let pick_gen = state.picker_generation.load(Ordering::SeqCst);
+            let flag = state.auto_hide_after_pick.swap(false, Ordering::SeqCst);
+            (flag, pick_gen)
+        };
         let _ = emit_state(&app, &app.state::<AppState>());
         show_copied_toast(&app, copy_format, &copied_value, monitor_bounds);
         let _ = app.emit("picker-result",PickerResult{color:record,copied_format:copy_format,copied_value});
+        // macOS：快捷键/菜单栏图标触发的取色，toast 播完后把整个应用隐藏，
+        // 焦点回到取色前的前台应用，主窗口不会跳出来。
+        // 若这 1.7 秒内开了新的取色就跳过，避免打断连续取色。
+        #[cfg(target_os = "macos")]
+        if hide_app_after.0 {
+            std::thread::sleep(Duration::from_millis(1800));
+            if app.state::<AppState>().picker_generation.load(Ordering::SeqCst) == hide_app_after.1 {
+                let _ = app.hide();
+            }
+        }
     });
     Ok(())
 }
@@ -751,6 +789,16 @@ fn confirm_color(app:AppHandle,state:State<AppState>,window:tauri::WebviewWindow
 fn cancel_picker(app:AppHandle)->Result<(),String>{
     tauri::async_runtime::spawn_blocking(move || {
         close_pickers(&app);
+        // macOS：快捷键/菜单栏图标触发的取色被取消，同样把焦点还给之前的应用。
+        #[cfg(target_os = "macos")]
+        {
+            let state = app.state::<AppState>();
+            let pick_gen = state.picker_generation.load(Ordering::SeqCst);
+            if state.auto_hide_after_pick.swap(false, Ordering::SeqCst)
+                && state.picker_generation.load(Ordering::SeqCst) == pick_gen {
+                let _ = app.hide();
+            }
+        }
         let _ = app.emit("picker-cancelled",());
     });
     Ok(())
@@ -795,7 +843,7 @@ pub fn run(){
         .setup(|app|{
             let data_path=app.path().app_data_dir()?.join("settings.json"); let mut settings: Settings=fs::read(&data_path).ok().and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or_default();
             for color in &mut settings.history { color.name=color_name(color.r,color.g,color.b).into(); }
-            let shortcut=settings.shortcut.clone(); app.manage(AppState{settings:Mutex::new(settings),captures:Mutex::new(HashMap::new()),picker_generation:AtomicU64::new(0),toast_generation:AtomicU64::new(0),picking:AtomicBool::new(false),main_minimize_on_picker_ready:AtomicBool::new(false),capture_setup_done:AtomicBool::new(false),screen_permission_requested:AtomicBool::new(false),data_path});
+            let shortcut=settings.shortcut.clone(); app.manage(AppState{settings:Mutex::new(settings),captures:Mutex::new(HashMap::new()),picker_generation:AtomicU64::new(0),toast_generation:AtomicU64::new(0),picking:AtomicBool::new(false),main_minimize_on_picker_ready:AtomicBool::new(false),capture_setup_done:AtomicBool::new(false),screen_permission_requested:AtomicBool::new(false),auto_hide_after_pick:AtomicBool::new(false),data_path});
             app.global_shortcut().register(shortcut.as_str())?;
             let show=MenuItem::with_id(app,"show","打开取色鸭",true,None::<&str>)?;let pick=MenuItem::with_id(app,"pick","开始取色",true,None::<&str>)?;let quit=MenuItem::with_id(app,"quit","退出",true,None::<&str>)?;let menu=Menu::with_items(app,&[&show,&pick,&quit])?;
             // Windows needs the colored, transparent rounded icon: the old tray.png
