@@ -38,9 +38,7 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            macOS：单击菜单栏图标直接取色（与 Windows 托盘一致），右键才弹出菜单；
-            从主窗口点"开始取色"不再有窗口淡出残影，截图更快；
-            取色层盖住 Dock，可对 Dock 区域取色，Dock 图标与主窗口同步显隐。
+            修复 macOS 授予屏幕录制权限后，点击取色直接闪退的问题。
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
@@ -74,9 +72,7 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            macOS：单击菜单栏图标直接取色（与 Windows 托盘一致），右键才弹出菜单；
-            从主窗口点"开始取色"不再有窗口淡出残影，截图更快；
-            取色层盖住 Dock，可对 Dock 区域取色，Dock 图标与主窗口同步显隐。
+            修复 macOS 授予屏幕录制权限后，点击取色直接闪退的问题。
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
@@ -93,9 +89,7 @@ jobs:
           tagName: v__VERSION__
           releaseName: "取色鸭 v__VERSION__"
           releaseBody: |
-            macOS：单击菜单栏图标直接取色（与 Windows 托盘一致），右键才弹出菜单；
-            从主窗口点"开始取色"不再有窗口淡出残影，截图更快；
-            取色层盖住 Dock，可对 Dock 区域取色，Dock 图标与主窗口同步显隐。
+            修复 macOS 授予屏幕录制权限后，点击取色直接闪退的问题。
 
             macOS：Apple Silicon 与 Intel 通用版 DMG / App。
             Windows：NSIS 安装包。
