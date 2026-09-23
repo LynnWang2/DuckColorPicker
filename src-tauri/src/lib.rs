@@ -535,14 +535,18 @@ fn open_picker(app: &AppHandle, request: u64, source: PickerSource) -> Result<()
         // 若不在前台，取色完成后把整个应用隐藏，把焦点还给取色前的应用，
         // 避免取色层关闭后主窗口跳到最前面打断用户。
         // 主窗口按钮触发的不需要（主窗口本来就是用户正在看的）。
-        // AppKit 调用必须在主线程，这里用 run_on_main_thread 派发。
+        // is_focused() 是 AppKit 调用，必须在主线程执行；
+        // run_on_main_thread 的闭包不能返回值，用 channel 把结果传回来。
         let from_main_button = source.changes_main_window();
+        let (tx, rx) = std::sync::mpsc::channel::<bool>();
         let app_clone = app.clone();
-        let app_was_active = app.run_on_main_thread(move || {
-            app_clone.get_webview_window("main")
+        let dispatched = app.run_on_main_thread(move || {
+            let focused = app_clone.get_webview_window("main")
                 .map(|w| w.is_focused().unwrap_or(false))
-                .unwrap_or(false)
-        }).unwrap_or(false);
+                .unwrap_or(false);
+            let _ = tx.send(focused);
+        }).is_ok();
+        let app_was_active = dispatched && rx.recv().unwrap_or(false);
         state.auto_hide_after_pick.store(!from_main_button && !app_was_active, Ordering::SeqCst);
     }
     #[cfg(target_os = "windows")]
