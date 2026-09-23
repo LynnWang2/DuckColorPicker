@@ -776,7 +776,7 @@ pub fn run(){
             #[cfg(target_os="macos")]
             let tray=tray_builder.show_menu_on_left_click(false).on_tray_icon_event(move|tray,event|if let TrayIconEvent::Click{button,button_state,..}=event{match(button,button_state){
                 (MouseButton::Left,MouseButtonState::Up)=>{let app=tray.app_handle().clone();let request=next_picker_request(&app);tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request,PickerSource::Tray);});},
-                (MouseButton::Right,MouseButtonState::Down)=>{let _=tray.set_menu(Some(&menu));let _=tray.show_menu();let _=tray.set_menu(None);},
+                (MouseButton::Right,MouseButtonState::Down)=>{let _=tray.set_menu(Some(Box::new(menu.clone())));tray.show_menu();let _=tray.set_menu(None);},
                 _=>{},
             }});
             #[cfg(not(any(target_os="windows",target_os="macos")))]
