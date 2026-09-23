@@ -203,6 +203,9 @@ fn show_main(app: &AppHandle) -> Result<(), String> {
 
 fn hide_main(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
+        // macOS: 先关掉窗口的淡入淡出动画再隐藏，否则截图会抓到半透明残影。
+        #[cfg(target_os = "macos")]
+        let _ = mac_window_anim::disable_show_hide_animation(&window);
         window.hide().map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "macos")]
@@ -474,6 +477,41 @@ mod mac_picker_level {
     }
 }
 
+/// macOS: 关掉主窗口的显示/隐藏动画。
+///
+/// NSWindow 默认在显示/隐藏时有淡入淡出动画；从主窗口点"开始取色"时，
+/// hide() 之后立刻截图会把淡出中的半透明窗口截进取色层，留下残影。
+/// 设为 NSWindowAnimationBehaviorNone 后隐藏是瞬时的，
+/// 截图前只需等窗口服务合成一帧即可（约 20ms）。
+/// 快捷键/菜单栏图标触发本来就不动主窗口，不需要这段延迟。
+#[cfg(target_os = "macos")]
+mod mac_window_anim {
+    use std::ffi::{c_void, CString};
+    use std::os::raw::c_char;
+    use tauri::WebviewWindow;
+
+    #[link(name = "objc")]
+    unsafe extern "C" {
+        fn sel_registerName(name: *const c_char) -> *mut c_void;
+        fn objc_msgSend(receiver: *mut c_void, sel: *mut c_void, ...) -> *mut c_void;
+    }
+
+    pub fn disable_show_hide_animation(window: &WebviewWindow) -> Result<(), String> {
+        unsafe {
+            let ns_window = window.ns_window().map_err(|e| e.to_string())?;
+            if ns_window.is_null() {
+                return Err("主窗口系统句柄为空".into());
+            }
+            // NSWindowAnimationBehaviorNone = 1（NSInteger，64 位上为 i64）。
+            let behavior: i64 = 1;
+            let sel_name = CString::new("setAnimationBehavior:").map_err(|e| e.to_string())?;
+            let sel = sel_registerName(sel_name.as_ptr());
+            objc_msgSend(ns_window, sel, behavior);
+        }
+        Ok(())
+    }
+}
+
 /// macOS: 点按 Dock 图标时重新显示主窗口。
 ///
 /// Tauri 默认不处理 applicationShouldHandleReopen，
@@ -520,7 +558,9 @@ fn open_picker(app: &AppHandle, request: u64, source: PickerSource) -> Result<()
                 // macOS: 主窗口隐藏时必须同步收起 Dock 图标（Accessory），
                 // 否则 Dock 图标还在，点按却唤不回主窗口。
                 hide_main(&app)?;
-                std::thread::sleep(Duration::from_millis(80));
+                // 淡出动画已在 hide_main 里关掉，这里只等窗口服务合成一帧，
+                // 避免截到尚未完全隐藏的窗口。快捷键/菜单栏触发不走这里，无延迟。
+                std::thread::sleep(Duration::from_millis(20));
             }
         }
         let monitors=Monitor::all().map_err(|e| format!("无法读取屏幕：{e}"))?;
