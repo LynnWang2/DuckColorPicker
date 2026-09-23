@@ -426,6 +426,60 @@ mod window_composition {
     }
 }
 
+/// macOS: 把取色窗口抬到 Dock 之上。
+///
+/// Tauri 的 `always_on_top` 在 macOS 只对应 NSFloatingWindowLevel，
+/// 仍然低于 Dock——取色层会被 Dock 图标盖住，鼠标靠近还会触发 Dock 放大。
+/// CGShieldingWindowLevel 是截图/取色类全屏覆盖层的标准层级，
+/// 盖住 Dock 与菜单栏后才能像 Windows 版一样全屏取色（含 Dock 区域）。
+#[cfg(target_os = "macos")]
+mod mac_picker_level {
+    use std::ffi::{c_void, CString};
+    use std::os::raw::c_char;
+    use tauri::WebviewWindow;
+
+    #[link(name = "objc")]
+    unsafe extern "C" {
+        fn sel_registerName(name: *const c_char) -> *mut c_void;
+        fn objc_msgSend(receiver: *mut c_void, sel: *mut c_void, ...) -> *mut c_void;
+    }
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGShieldingWindowLevel() -> i32;
+    }
+
+    pub fn raise_above_dock(window: &WebviewWindow) -> Result<(), String> {
+        unsafe {
+            let ns_window = window.ns_window().map_err(|e| e.to_string())?;
+            if ns_window.is_null() {
+                return Err("取色窗口系统句柄为空".into());
+            }
+            // NSWindow.Level 是 NSInteger（64 位上为 i64）。
+            let level = CGShieldingWindowLevel() as i64;
+            let sel_name = CString::new("setLevel:").map_err(|e| e.to_string())?;
+            let sel = sel_registerName(sel_name.as_ptr());
+            objc_msgSend(ns_window, sel, level);
+        }
+        Ok(())
+    }
+}
+
+/// macOS: 点按 Dock 图标时重新显示主窗口。
+///
+/// Tauri 默认不处理 applicationShouldHandleReopen，
+/// Dock 图标点按后主窗口不会自己回来。这里只负责显示窗口，
+/// 不打断正在进行的取色。
+#[cfg(target_os = "macos")]
+fn reopen_main_window(app: &AppHandle) {
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 fn open_picker(app: &AppHandle, request: u64, source: PickerSource) -> Result<(), String> {
     let state = app.state::<AppState>();
     if request != state.picker_generation.load(Ordering::SeqCst) { return Ok(()); }
@@ -438,8 +492,8 @@ fn open_picker(app: &AppHandle, request: u64, source: PickerSource) -> Result<()
         #[cfg(target_os = "macos")]
         ensure_screen_capture_permission(app)?;
         if source.changes_main_window() {
+            #[cfg(target_os = "windows")]
             if let Some(window) = app.get_webview_window("main") {
-                #[cfg(target_os = "windows")]
                 {
                     let _ = window_composition::disable_transitions(&window);
                     if window_composition::exclude_from_capture(&window, true).is_ok() {
@@ -451,11 +505,13 @@ fn open_picker(app: &AppHandle, request: u64, source: PickerSource) -> Result<()
                         window_composition::wait_for_hidden_frame();
                     }
                 }
-                #[cfg(not(target_os = "windows"))]
-                {
-                    window.hide().map_err(|e| e.to_string())?;
-                    std::thread::sleep(Duration::from_millis(80));
-                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                // macOS: 主窗口隐藏时必须同步收起 Dock 图标（Accessory），
+                // 否则 Dock 图标还在，点按却唤不回主窗口。
+                hide_main(&app)?;
+                std::thread::sleep(Duration::from_millis(80));
             }
         }
         let monitors=Monitor::all().map_err(|e| format!("无法读取屏幕：{e}"))?;
@@ -486,6 +542,10 @@ fn open_picker(app: &AppHandle, request: u64, source: PickerSource) -> Result<()
             let window=WebviewWindowBuilder::new(app,&label,WebviewUrl::App("picker.html".into()))
                 .title("取色鸭").decorations(false).transparent(true).shadow(false).always_on_top(true).skip_taskbar(true)
                 .position(x,y).inner_size(view_width,view_height).accept_first_mouse(true).focused(false).visible(false).build().map_err(|e|e.to_string())?;
+            // macOS: always_on_top 盖不住 Dock，抬到 CGShieldingWindowLevel
+            // 才能对 Dock 区域取色，且鼠标过去不再触发 Dock 放大。
+            #[cfg(target_os = "macos")]
+            mac_picker_level::raise_above_dock(&window)?;
             if request != state.picker_generation.load(Ordering::SeqCst) {
                 let _ = window.close();
                 if let Ok(mut frames) = state.captures.lock() { frames.remove(&label); }
@@ -711,7 +771,17 @@ pub fn run(){
         })
         .on_window_event(|window,event|if window.label()=="main"{if let tauri::WindowEvent::CloseRequested{api,..}=event{api.prevent_close();let _=hide_main(window.app_handle());}})
         .invoke_handler(tauri::generate_handler![get_state,update_preferences,save_shortcut,start_picker,picker_pointer,get_capture_image,show_ready_picker,sample_color,confirm_color,cancel_picker,clear_history,delete_history,copy_value,open_project_url,open_xiaohongshu_url,screen_permission_status,request_screen_permission,open_screen_recording_settings,restart_app])
-        .run(tauri::generate_context!()).expect("取色鸭启动失败");
+        .build(tauri::generate_context!())
+        .expect("取色鸭启动失败")
+        .run(|app_handle, event| {
+            // macOS: 点按 Dock 图标必须重新显示主窗口（Tauri 默认不处理 Reopen）。
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                reopen_main_window(app_handle);
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app_handle, event);
+        });
 }
 
 #[cfg(test)]
