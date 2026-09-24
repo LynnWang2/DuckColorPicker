@@ -15,26 +15,26 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
     color-scheme: dark;
-    --bg: #181513;
+    --bg: #221e1b;
     --card: #201d19;
     --text: #f7f7f9;
     --muted: #adb2be;
     --line: #3f3a32;
     --field: #26221d;
-    --hero-start: #353028;
-    --hero-end: #26221d;
+    --hero-start: #3f3930;
+    --hero-end: #302b25;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #181513;
+  --bg: #221e1b;
   --card: #201d19;
   --text: #f7f7f9;
   --muted: #adb2be;
   --line: #3f3a32;
   --field: #26221d;
-  --hero-start: #353028;
-  --hero-end: #26221d;
+  --hero-start: #3f3930;
+  --hero-end: #302b25;
 }
 * { box-sizing: border-box; user-select: none; -webkit-user-select: none; }
 html, body { width: 100%; height: 100%; margin: 0; }
@@ -58,7 +58,7 @@ button, select { cursor: pointer; }
 .brand h1 { margin: 0; color: var(--text); font-size: 21px; line-height: 1.18; font-weight: 750; }
 .brand p { margin: 2px 0 0; color: var(--muted); font-size: 13px; line-height: 1.2; letter-spacing: .15px; }
 .pick { display: flex; width: 100%; height: 69px; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px 10px; border: 0; border-radius: 17px; background: linear-gradient(105deg, #ffe788, #ffb72d); color: #111827; transition: transform .15s, filter .15s; }
-.pick:hover { transform: translateY(-1px); filter: brightness(1.02); }
+.pick:hover { transform: translateY(-8px); filter: brightness(1.02); }
 .pick:active { transform: translateY(0); }
 .pick-title { font-size: 24px; line-height: 1.2; font-weight: 800; letter-spacing: .5px; }
 .pick-shortcut { color: #685a41; font-size: 14px; line-height: 1.2; font-weight: 500; }
@@ -105,7 +105,7 @@ button, select { cursor: pointer; }
 .custom-select { position: relative; width: 146px; }
 .custom-select select { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .select-trigger { display: flex; width: 146px; height: 32px; align-items: center; justify-content: space-between; padding: 0 11px; border: 1px solid var(--line); border-radius: 11px; background: var(--field); color: var(--text); font-size: 13px; text-align: left; }
-.select-chevron { font-size: 17px; line-height: 1; }
+.select-chevron { font-size: 17px; line-height: 1; transform: translateY(-8px); }
 .select-list { position: absolute; z-index: 10; top: 35px; right: 0; display: none; width: 146px; padding: 4px; border: 1px solid var(--line); border-radius: 11px; background: var(--field); box-shadow: 0 7px 20px rgba(0,0,0,.12); }
 .custom-select:has(#copyFormat) .select-list { top: auto; bottom: 35px; }
 .custom-select.open .select-list { display: grid; gap: 2px; }
