@@ -58,7 +58,7 @@ button, select { cursor: pointer; }
 .brand h1 { margin: 0; color: var(--text); font-size: 21px; line-height: 1.18; font-weight: 750; }
 .brand p { margin: 2px 0 0; color: var(--muted); font-size: 13px; line-height: 1.2; letter-spacing: .15px; }
 .pick { display: flex; width: 100%; height: 69px; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px 10px; border: 0; border-radius: 17px; background: linear-gradient(105deg, #ffe788, #ffb72d); color: #111827; transition: transform .15s, filter .15s; }
-.pick:hover { transform: translateY(-8px); filter: brightness(1.02); }
+.pick:hover { transform: translateY(-1px); filter: brightness(1.02); }
 .pick:active { transform: translateY(0); }
 .pick-title { font-size: 24px; line-height: 1.2; font-weight: 800; letter-spacing: .5px; }
 .pick-shortcut { color: #685a41; font-size: 14px; line-height: 1.2; font-weight: 500; }
