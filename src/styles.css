@@ -15,26 +15,26 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
     color-scheme: dark;
-    --bg: #1b1510;
-    --card: #241d15;
+    --bg: #181513;
+    --card: #201d19;
     --text: #f7f7f9;
     --muted: #adb2be;
-    --line: #453b2c;
-    --field: #2b2318;
-    --hero-start: #3c3121;
-    --hero-end: #2b2318;
+    --line: #3f3a32;
+    --field: #26221d;
+    --hero-start: #353028;
+    --hero-end: #26221d;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #1b1510;
-  --card: #241d15;
+  --bg: #181513;
+  --card: #201d19;
   --text: #f7f7f9;
   --muted: #adb2be;
-  --line: #453b2c;
-  --field: #2b2318;
-  --hero-start: #3c3121;
-  --hero-end: #2b2318;
+  --line: #3f3a32;
+  --field: #26221d;
+  --hero-start: #353028;
+  --hero-end: #26221d;
 }
 * { box-sizing: border-box; user-select: none; -webkit-user-select: none; }
 html, body { width: 100%; height: 100%; margin: 0; }
