@@ -18,6 +18,7 @@ use tauri::{
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 use tauri_plugin_autostart::MacosLauncher;
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use uuid::Uuid;
 use xcap::Monitor;
@@ -359,6 +360,26 @@ fn show_copied_toast(app: &AppHandle, format: CopyFormat, value: &str, monitor_b
 
 #[tauri::command]
 fn get_state(state: State<AppState>) -> Result<Settings, String> { state.settings.lock().map(|v| v.clone()).map_err(|_| "设置被占用".into()) }
+
+/// 开机启动开关：以系统实际状态为准，做成幂等的。
+/// 直接调插件的 disable()，当 Windows 注册表 Run 项早已被外部清理
+/// （如安全软件、重装）时会报"系统找不到指定的文件。(os error 2)"，
+/// 导致开关卡在"开"的状态关不掉。这里先查实际状态，已是目标状态就直接成功。
+#[tauri::command]
+fn set_autostart(app: AppHandle, enable: bool) -> Result<(), String> {
+    let autolaunch = app.autolaunch();
+    if autolaunch.is_enabled().map(|on| on == enable).unwrap_or(false) {
+        return Ok(());
+    }
+    if let Err(e) = if enable { autolaunch.enable() } else { autolaunch.disable() } {
+        // 操作报错后以实际状态为准：目标已达成则视为成功
+        if autolaunch.is_enabled().unwrap_or(false) == enable {
+            return Ok(());
+        }
+        return Err(e.to_string());
+    }
+    Ok(())
+}
 
 #[tauri::command]
 fn update_preferences(app: AppHandle, state: State<AppState>, preferences: Preferences) -> Result<(), String> {
@@ -846,7 +867,13 @@ pub fn run(){
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app,_shortcut,event|{if event.state()==ShortcutState::Pressed{let request=next_picker_request(app);let app=app.clone();tauri::async_runtime::spawn_blocking(move||{let _=open_picker(&app,request,PickerSource::Shortcut);});}}).build())
         .setup(|app|{
             let data_path=app.path().app_data_dir()?.join("settings.json"); let mut settings: Settings=fs::read(&data_path).ok().and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or_default();
+            let loaded_auto_start=settings.auto_start;
             for color in &mut settings.history { color.name=color_name(color.r,color.g,color.b).into(); }
+            // 开机启动开关以系统实际状态为准：本地设置可能是陈旧的（注册表 Run 项 /
+            // LaunchAgent 早已被外部清理或从未写入），用旧值会显示错误的"开"且关不掉
+            // （disable 会报 os error 2）。启动时按实际状态校准一次并落盘。
+            if let Ok(real)=app.autolaunch().is_enabled() { settings.auto_start=real; }
+            if settings.auto_start!=loaded_auto_start { if let Ok(bytes)=serde_json::to_vec_pretty(&settings) { let _=fs::write(&data_path,bytes); } }
             let shortcut=settings.shortcut.clone(); app.manage(AppState{settings:Mutex::new(settings),captures:Mutex::new(HashMap::new()),picker_generation:AtomicU64::new(0),toast_generation:AtomicU64::new(0),picking:AtomicBool::new(false),main_minimize_on_picker_ready:AtomicBool::new(false),capture_setup_done:AtomicBool::new(false),screen_permission_requested:AtomicBool::new(false),auto_hide_after_pick:AtomicBool::new(false),data_path});
             app.global_shortcut().register(shortcut.as_str())?;
             let show=MenuItem::with_id(app,"show","打开取色鸭",true,None::<&str>)?;let pick=MenuItem::with_id(app,"pick","开始取色",true,None::<&str>)?;let quit=MenuItem::with_id(app,"quit","退出",true,None::<&str>)?;let menu=Menu::with_items(app,&[&show,&pick,&quit])?;
@@ -898,7 +925,7 @@ pub fn run(){
             Ok(())
         })
         .on_window_event(|window,event|if window.label()=="main"{if let tauri::WindowEvent::CloseRequested{api,..}=event{api.prevent_close();let _=hide_main(window.app_handle());}})
-        .invoke_handler(tauri::generate_handler![get_state,update_preferences,save_shortcut,start_picker,picker_pointer,get_capture_image,show_ready_picker,sample_color,confirm_color,cancel_picker,clear_history,delete_history,copy_value,open_project_url,open_xiaohongshu_url,screen_permission_status,request_screen_permission,open_screen_recording_settings,restart_app])
+        .invoke_handler(tauri::generate_handler![get_state,set_autostart,update_preferences,save_shortcut,start_picker,picker_pointer,get_capture_image,show_ready_picker,sample_color,confirm_color,cancel_picker,clear_history,delete_history,copy_value,open_project_url,open_xiaohongshu_url,screen_permission_status,request_screen_permission,open_screen_recording_settings,restart_app])
         .build(tauri::generate_context!())
         .expect("取色鸭启动失败")
         .run(|app_handle, event| {
